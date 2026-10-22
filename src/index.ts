@@ -52,7 +52,15 @@ export {
   loadIconFromJar,
   type ModMetadata,
 } from "./modMetadata";
-export { sha512Hex, trySha512Hex } from "./hashing";
+export {
+  sha1Hex,
+  sha256Hex,
+  sha512Hex,
+  trySha512Hex,
+  verifyWithWebCrypto,
+  type ExpectedHashes,
+  type HashCheck,
+} from "./hashing";
 export {
   getProjects,
   getVersionsFromHashes,

@@ -15,6 +15,12 @@
  * failed download (whatever it rejected with) cancels its row.
  */
 import { getErrorMessage } from "./utils";
+import {
+  trySha512Hex,
+  verifyWithWebCrypto,
+  type ExpectedHashes,
+  type HashCheck,
+} from "./hashing";
 import type { ExtractedJar, ImportMetadata, PackEntry, ReviewRow, SkipReason } from "./types";
 
 export type RowProgress =
@@ -37,8 +43,17 @@ export interface RunnerDeps<R extends ExtractedJar = ExtractedJar> {
     result: R,
     metadata: ImportMetadata,
   ) => Promise<{ status: "added" | "duplicate"; itemCount: number; tagCount: number }>;
-  /** Lowercase hex sha512; undefined when hashing is unavailable */
-  hash: (buffer: ArrayBuffer) => Promise<string | undefined>;
+  /**
+   * Check the bytes against the hashes the pack lists (sha512, sha256,
+   * sha1; only those it has). Default: {@link verifyWithWebCrypto}.
+   */
+  verify?: (buffer: ArrayBuffer, expected: ExpectedHashes) => Promise<HashCheck>;
+  /**
+   * The SHA-512 for `ImportMetadata.sha512` when verify did not confirm the
+   * pack's own (lowercase hex; undefined when hashing is unavailable).
+   * Default: {@link trySha512Hex}.
+   */
+  sha512?: (buffer: ArrayBuffer) => Promise<string | undefined>;
   /**
    * An extraction error that means the JAR has nothing to import (the row
    * is skipped as "no items", not failed). Default: an error named
@@ -76,6 +91,11 @@ export interface RunOptions {
    * drops blocked alternatives.
    */
   allowUrl?: (url: string) => boolean;
+  /**
+   * Fail a row whose file the pack lists a hash for when the runner could
+   * not check it (verify said "unavailable"). Rows without any hash run.
+   */
+  requireHash?: boolean;
   packName?: string;
   onRow: (key: string, progress: RowProgress) => void;
 }
@@ -103,6 +123,15 @@ type Fetched =
 
 function rowFilename(entry: PackEntry): string {
   return entry.filename;
+}
+
+/** The hashes the entry lists, lowercase, without the absent ones. */
+function expectedHashes(entry: PackEntry): ExpectedHashes {
+  const expected: ExpectedHashes = {};
+  for (const a of ["sha512", "sha256", "sha1"] as const) {
+    if (entry[a]) expected[a] = entry[a].toLowerCase();
+  }
+  return expected;
 }
 
 function hostOf(url: string): string {
@@ -261,14 +290,20 @@ export async function runImport<R extends ExtractedJar>(
     }
 
     try {
-      const computed = await deps.hash(fetched.buffer);
-      if (entry.sha512 && computed && computed !== entry.sha512.toLowerCase()) {
-        const error = "hash mismatch";
+      const expected = expectedHashes(entry);
+      const check = await (deps.verify ?? verifyWithWebCrypto)(fetched.buffer, expected);
+      const unchecked = check !== "ok" && Object.keys(expected).length > 0;
+      if (check === "mismatch" || (unchecked && opts.requireHash)) {
+        const error = check === "mismatch" ? "hash mismatch" : "hash not verified";
         onRow(key, { phase: "failed", error });
         summary.failed.push({ key, filename, error });
         continue;
       }
-      const sha512 = computed ?? entry.sha512;
+      const hashVerified = check === "ok";
+      const sha512 =
+        hashVerified && expected.sha512
+          ? expected.sha512
+          : await (deps.sha512 ?? trySha512Hex)(fetched.buffer);
 
       onRow(key, { phase: "extracting" });
       let result: R;
@@ -296,6 +331,7 @@ export async function runImport<R extends ExtractedJar>(
         importSource: "pack",
         packName,
         sha512,
+        hashVerified,
         modrinthProjectId,
         modrinthVersionId,
         iconUrl: modrinthProject?.iconUrl ?? undefined,

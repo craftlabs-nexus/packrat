@@ -233,13 +233,24 @@ export function parsePwToml(text: string): PwToml | undefined {
   }
 }
 
+/**
+ * Set the entry's hash of a packwiz hash-format (sha512, sha256, sha1;
+ * other formats such as md5 or murmur2 are ignored).
+ */
+export function setPackwizHash(
+  entry: PackEntry,
+  format: string | undefined,
+  hash: string | undefined,
+): void {
+  if (!hash) return;
+  const f = format?.toLowerCase();
+  if (f === "sha512" || f === "sha256" || f === "sha1") entry[f] = hash.toLowerCase();
+}
+
 /** Fill entry fields from a .pw.toml (packwiz or Prism mods/.index). */
 export function applyPwToml(entry: PackEntry, pw: PwToml): void {
   entry.side = pw.side;
-  const format = pw.download["hash-format"]?.toLowerCase();
-  const hash = pw.download.hash?.toLowerCase();
-  if (hash && format === "sha512") entry.sha512 = hash;
-  if (hash && format === "sha1") entry.sha1 = hash;
+  setPackwizHash(entry, pw.download["hash-format"], pw.download.hash);
   const modrinth = pw.update?.modrinth;
   if (modrinth) {
     entry.modrinth = {

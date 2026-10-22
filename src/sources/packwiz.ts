@@ -22,7 +22,7 @@ import {
   type PackEntry,
   type PackLoaderId,
 } from "../types";
-import { applyPwToml, parsePwToml } from "./folder";
+import { applyPwToml, parsePwToml, setPackwizHash } from "./folder";
 
 export const PACKWIZ_FETCH_CONCURRENCY = 6;
 
@@ -154,7 +154,7 @@ export async function analyzePackwiz(
       `Invalid index.toml: ${describeZodError(index.error)}`,
     );
   }
-  const indexHashFormat = index.data["hash-format"]?.toLowerCase();
+  const indexHashFormat = index.data["hash-format"];
 
   const limit = createLimiter(PACKWIZ_FETCH_CONCURRENCY);
   const tasks: Promise<PackEntry | undefined>[] = [];
@@ -218,8 +218,7 @@ export async function analyzePackwiz(
         filename: basename(path),
         origin: { type: "remote", url: fileUrl },
       };
-      if (f.hash && indexHashFormat === "sha512") entry.sha512 = f.hash.toLowerCase();
-      if (f.hash && indexHashFormat === "sha1") entry.sha1 = f.hash.toLowerCase();
+      setPackwizHash(entry, f["hash-format"] ?? indexHashFormat, f.hash);
       tasks.push(Promise.resolve(entry));
     }
   }

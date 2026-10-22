@@ -48,6 +48,8 @@ export interface PackEntry {
   /** Lowercase hex, from the manifest or computed */
   sha512?: string;
   sha1?: string;
+  /** packwiz files hashed with its default hash-format */
+  sha256?: string;
   modrinth?: { projectId?: string; versionId?: string };
   curseforge?: { projectId: number; fileId: number };
   /** packwiz [option] optional = true, default = false */
@@ -169,8 +171,14 @@ export interface ExistingSource {
 export interface ImportMetadata {
   importSource: "pack";
   packName?: string;
-  /** Lowercase hex SHA-512 of the JAR bytes (computed, else the pack's) */
+  /**
+   * Lowercase hex SHA-512 of the JAR bytes: the pack's when verify confirmed
+   * it, else computed (absent when hashing is unavailable). Never an
+   * unverified claim of the pack.
+   */
   sha512?: string;
+  /** The bytes matched every hash the pack lists for the file */
+  hashVerified: boolean;
   modrinthProjectId?: string;
   modrinthVersionId?: string;
   iconUrl?: string;

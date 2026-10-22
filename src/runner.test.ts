@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { runImport, type RowProgress, type RunnerDeps } from "./runner";
+import type { ExpectedHashes } from "./hashing";
 import type { ExtractedJar } from "./types";
 
 /** CategoryCraft's extraction error, as the runner's default recognizes it. */
@@ -83,7 +84,12 @@ function deps(overrides: Partial<RunnerDeps<TestResult>> = {}): RunnerDeps<TestR
       itemCount: r.data.items.length,
       tagCount: Object.keys(r.data.tags).length,
     })),
-    hash: vi.fn(async (buffer: ArrayBuffer) => `h-${new TextDecoder().decode(buffer)}`),
+    // the bytes of a test file are its name; its "hash" is h-<name>
+    verify: vi.fn(async (buffer: ArrayBuffer, expected: ExpectedHashes) => {
+      if (!expected.sha512) return "unavailable" as const;
+      return expected.sha512 === `h-${new TextDecoder().decode(buffer)}` ? ("ok" as const) : ("mismatch" as const);
+    }),
+    sha512: vi.fn(async (buffer: ArrayBuffer) => `h-${new TextDecoder().decode(buffer)}`),
     ...overrides,
   };
 }
@@ -128,6 +134,7 @@ describe("runImport", () => {
       importSource: "pack",
       packName: "Pack",
       sha512: "h-b.jar",
+      hashVerified: false,
       modrinthProjectId: "P1",
       modrinthVersionId: "V1",
       iconUrl: "https://cdn/b.png",
@@ -255,6 +262,46 @@ describe("runImport", () => {
       },
     ]);
     expect(summary.imported).toBe(1);
+  });
+
+  it("verifies sha1 and sha256 too, and records only a verified or computed sha512", async () => {
+    const verify = vi.fn(async () => "ok" as const);
+    const sha512 = vi.fn(async () => "computed");
+    const d = deps({ verify, sha512 });
+    const rows = [row("a.jar", { remote: true }), row("b.jar", { remote: true, sha512: "AA" })];
+    rows[0].entry.sha1 = "S1";
+    rows[0].entry.sha256 = "S256";
+    await runImport(rows, d, { signal: new AbortController().signal, onRow: () => {} });
+    expect(verify.mock.calls.map((c) => (c as unknown[])[1])).toEqual([{ sha1: "s1", sha256: "s256" }, { sha512: "aa" }]);
+    const metadata = (d.commit as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[1]);
+    expect(metadata.map((m) => [m.sha512, m.hashVerified])).toEqual([
+      ["computed", true],
+      ["aa", true],
+    ]);
+    expect(sha512).toHaveBeenCalledTimes(1);
+  });
+
+  it("imports an unchecked row unless requireHash, which fails it", async () => {
+    const verify = vi.fn(async () => "unavailable" as const);
+    const sha512 = vi.fn(async () => undefined);
+    const rows = () => [row("listed.jar", { remote: true, sha512: "claimed" }), row("unlisted.jar", { remote: true })];
+
+    const d = deps({ verify, sha512 });
+    const summary = await runImport(rows(), d, { signal: new AbortController().signal, onRow: () => {} });
+    expect(summary.imported).toBe(2);
+    // the pack's unverified claim is not passed on as the JAR's sha512
+    expect((d.commit as ReturnType<typeof vi.fn>).mock.calls[0][1]).toMatchObject({
+      sha512: undefined,
+      hashVerified: false,
+    });
+
+    const strict = await runImport(rows(), deps({ verify, sha512 }), {
+      signal: new AbortController().signal,
+      onRow: () => {},
+      requireHash: true,
+    });
+    expect(strict.imported).toBe(1);
+    expect(strict.failed).toEqual([{ key: "listed.jar", filename: "listed.jar", error: "hash not verified" }]);
   });
 
   it("tries the next URL when a download can't connect", async () => {

@@ -99,6 +99,8 @@ export const indexTomlSchema = z.looseObject({
       z.looseObject({
         file: z.string(),
         hash: z.string().optional(),
+        /** Overrides the index's hash-format for this file */
+        "hash-format": z.string().optional(),
         metafile: z.boolean().optional(),
         alias: z.string().optional(),
       }),

@@ -158,6 +158,41 @@ describe("analyzePackwiz", () => {
     });
   });
 
+  it("reads the index's hash-format and a file's own override", async () => {
+    const { fetchMock } = stubFetch({
+      [`${BASE}/pack.toml`]: `[index]\nfile = "index.toml"\n`,
+      [`${BASE}/index.toml`]: `hash-format = "sha256"
+
+[[files]]
+file = "mods/a.jar"
+hash = "AA"
+
+[[files]]
+file = "mods/b.jar"
+hash = "BB"
+hash-format = "sha512"
+
+[[files]]
+file = "mods/c.jar"
+hash = "CC"
+hash-format = "sha1"
+
+[[files]]
+file = "mods/d.jar"
+hash = "DD"
+hash-format = "murmur2"
+`,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { entries } = await analyzePackwiz(`${BASE}/pack.toml`);
+    expect(entries.map(({ filename, sha512, sha256, sha1 }) => ({ filename, sha512, sha256, sha1 }))).toEqual([
+      { filename: "a.jar", sha256: "aa" },
+      { filename: "b.jar", sha512: "bb" },
+      { filename: "c.jar", sha1: "cc" },
+      { filename: "d.jar" },
+    ]);
+  });
+
   it("refuses an index outside the pack", async () => {
     for (const file of ["https://evil.example/index.toml", "//evil.example/index.toml", "../index.toml"]) {
       const { fetchMock, calls } = stubFetch({
