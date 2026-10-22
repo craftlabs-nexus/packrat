@@ -1,5 +1,6 @@
 /**
- * Review groups: how the review step and the store bucket plan rows.
+ * Review groups: how a consumer can bucket plan rows for review (one group
+ * per status the default content rule produces).
  */
 import type { ReviewRow } from "./types";
 

@@ -103,7 +103,7 @@ export interface BuildPlanContext {
   skipClientOnly?: boolean;
 }
 
-/** A source's display name, as the Sources modal shows it. */
+/** An existing source's display name (the "already imported" detail). */
 export function sourceDisplayName(s: ExistingSource): string {
   return (
     s.displayName || s.modDisplayName || s.modId || s.filename.replace(/\.jar$/i, "")

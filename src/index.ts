@@ -1,5 +1,7 @@
 /**
- * Modpack / mods folder import (see ARCHITECTURE.md "Modpack import").
+ * Packrat: read a Minecraft modpack (a launcher folder, an .mrpack, a
+ * CurseForge zip, a packwiz URL), plan its import and fetch its JARs.
+ * See README.md.
  */
 export * from "./types";
 export { scanJar, isJarFilename } from "./jarScan";

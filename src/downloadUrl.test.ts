@@ -116,10 +116,10 @@ describe("blocked copy", () => {
     const internal = { kind: "blocked", reason: "internal-host", detail: "pack" } as const;
     expect(describeBlockedDownload(internal)).toBe("internal host pack (not reachable from a web page)");
     expect(describeBlockedGroup(internal, 12)).toBe(
-      "12 files on pack are internal to the server; a folder import gets them.",
+      "12 files on pack are internal to the server (not reachable from a web page).",
     );
     expect(describeBlockedGroup(internal, 1)).toBe(
-      "1 file on pack is internal to the server; a folder import gets it.",
+      "1 file on pack is internal to the server (not reachable from a web page).",
     );
     expect(
       describeBlockedDownload({ kind: "blocked", reason: "host-no-cors", detail: "github.com" }),

@@ -358,9 +358,9 @@ describe("buildPlan download URLs", () => {
     });
     expect(statusOf(plan, "m.jar").kind).toBe("import");
     expect(plan.notes).toEqual([
-      "12 files on pack are internal to the server; a folder import gets them.",
-      "1 file on github.com can't be downloaded from a web page (no CORS); a folder import gets it.",
-      "1 file on files.example uses http://, which an https page can't download; a folder import gets it.",
+      "12 files on pack are internal to the server (not reachable from a web page).",
+      "1 file on github.com can't be downloaded from a web page (no CORS).",
+      "1 file on files.example uses http://, which an https page can't download.",
     ]);
   });
 
@@ -418,7 +418,7 @@ describe("buildPlan download URLs", () => {
     });
     expect(statusOf(plan, "b.jar").kind).toBe("unresolvable");
     expect(plan.notes).toEqual([
-      "1 file on github.com can't be downloaded from a web page (no CORS); a folder import gets it.",
+      "1 file on github.com can't be downloaded from a web page (no CORS).",
     ]);
   });
 

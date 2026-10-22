@@ -1,8 +1,8 @@
 /**
- * Types for importing a modpack or mods folder (see ARCHITECTURE.md
- * "Modpack import"): a source analyzer turns the input into a manifest and
- * entries, buildPlan() turns those into reviewable rows, runImport() imports
- * the selected rows.
+ * Types for importing a modpack or mods folder: a source analyzer turns the
+ * input into a manifest and entries, buildPlan() turns those into
+ * reviewable rows, fetchRows() and runImport() fetch and import the
+ * selected rows.
  */
 import type { UrlVerdict } from "./downloadUrl";
 import type { modrinthSideSchema } from "./schemas";

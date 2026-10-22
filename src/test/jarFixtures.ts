@@ -40,15 +40,3 @@ export async function makeModJar(
   for (const id of itemIds) files[`assets/${modId}/items/${id}.json`] = "{}";
   return makeZipFile(files, name);
 }
-
-/** A Fabric "mod" JAR without code (a data pack in a JAR). */
-export async function makeDataJar(modId: string, name = `${modId}.jar`): Promise<File> {
-  return makeZipFile(
-    {
-      "fabric.mod.json": JSON.stringify({ id: modId, version: "1.0.0" }),
-      [`assets/${modId}/items/fake.json`]: "{}",
-      [`data/${modId}/tags/item/x.json`]: '{"values":[]}',
-    },
-    name,
-  );
-}

@@ -4,7 +4,7 @@
  * the host must answer with CORS headers, must be reachable from the
  * browser, and an https page cannot fetch http:// (mixed content).
  *
- * Rules, first match wins (ARCHITECTURE.md "Modpack import"):
+ * Rules, first match wins:
  * 1. not an http(s) URL, or credentials in it -> blocked "invalid-url"
  * 2. same origin as the pack (it already loaded)  -> ok "pack-origin"
  * 3. loopback (localhost, 127/8, [::1])           -> ok "loopback"
@@ -202,22 +202,24 @@ export function describeBlockedDownload(
   }
 }
 
-/** One plan note for `count` blocked files sharing a reason and host. */
+/**
+ * One plan note for `count` blocked files sharing a reason and host: what
+ * is wrong, not what to do about it (that is the consumer's to say).
+ */
 export function describeBlockedGroup(
   verdict: Extract<UrlVerdict, { kind: "blocked" }>,
   count: number,
 ): string {
   const one = count === 1;
   const files = `${count} file${one ? "" : "s"}`;
-  const tail = `a folder import gets ${one ? "it" : "them"}.`;
   switch (verdict.reason) {
     case "invalid-url":
       return `${files} ${one ? "has" : "have"} an invalid download URL (${verdict.detail}).`;
     case "internal-host":
-      return `${files} on ${verdict.detail} ${one ? "is" : "are"} internal to the server; ${tail}`;
+      return `${files} on ${verdict.detail} ${one ? "is" : "are"} internal to the server (not reachable from a web page).`;
     case "mixed-content":
-      return `${files} on ${verdict.detail} ${one ? "uses" : "use"} http://, which an https page can't download; ${tail}`;
+      return `${files} on ${verdict.detail} ${one ? "uses" : "use"} http://, which an https page can't download.`;
     case "host-no-cors":
-      return `${files} on ${verdict.detail} can't be downloaded from a web page (no CORS); ${tail}`;
+      return `${files} on ${verdict.detail} can't be downloaded from a web page (no CORS).`;
   }
 }
