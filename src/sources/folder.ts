@@ -4,6 +4,7 @@
  */
 import { parse as parseToml } from "smol-toml";
 import { isJarFilename } from "../jarScan";
+import { basename } from "../utils";
 import {
   atlauncherInstanceSchema,
   curseforgeInstanceSchema,
@@ -68,10 +69,6 @@ const MAX_MODS_FOLDER_DEPTH = 4;
 function dirname(path: string): string {
   const i = path.lastIndexOf("/");
   return i === -1 ? "" : path.slice(0, i);
-}
-
-function basename(path: string): string {
-  return path.slice(path.lastIndexOf("/") + 1);
 }
 
 /** "" for the root, else the directory itself and each ancestor up to "". */

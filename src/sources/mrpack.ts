@@ -3,6 +3,7 @@
  * (Modrinth CDN URLs with hashes and client/server env); overrides/,
  * server-overrides/ and client-overrides/ hold bundled files.
  */
+import type JSZip from "jszip";
 import { z } from "zod";
 import { isJarFilename } from "../jarScan";
 import {
@@ -17,7 +18,8 @@ import {
   type PackLoaderId,
   type PackSide,
 } from "../types";
-import { loadPackZip, overrideJarEntries, readZipJson, zipBasename } from "./zip";
+import { basename } from "../utils";
+import { loadPackZip, overrideJarEntries, readZipJson } from "./zip";
 
 /** The index with files checked one by one (a bad entry doesn't sink the pack). */
 const indexWithLooseFiles = mrpackIndexSchema.extend({
@@ -40,12 +42,16 @@ export function sideFromEnv(
 }
 
 export async function analyzeMrpack(file: File): Promise<PackAnalysis> {
-  const zip = await loadPackZip(file, file.name);
+  return analyzeMrpackZip(await loadPackZip(file, file.name), file.name);
+}
+
+/** analyzeMrpack on a zip already loaded (`label`: its file name). */
+export async function analyzeMrpackZip(zip: JSZip, label: string): Promise<PackAnalysis> {
   const raw = await readZipJson(zip, "modrinth.index.json");
   if (raw === undefined) {
     throw new PackImportError(
       "INVALID_PACK",
-      `${file.name} is not a Modrinth pack: modrinth.index.json is missing`,
+      `${label} is not a Modrinth pack: modrinth.index.json is missing`,
     );
   }
   const parsed = indexWithLooseFiles.safeParse(raw);
@@ -67,7 +73,7 @@ export async function analyzeMrpack(file: File): Promise<PackAnalysis> {
       continue;
     }
     const { path, hashes, env, downloads, fileSize } = f.data;
-    const filename = zipBasename(path);
+    const filename = basename(path);
     if (path !== `mods/${filename}` || !isJarFilename(filename)) continue;
     const entry: PackEntry = {
       key: path,

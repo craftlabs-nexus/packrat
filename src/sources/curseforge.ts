@@ -3,6 +3,7 @@
  * which the browser cannot download (the CurseForge API needs a key), so
  * only the JARs bundled under overrides/mods/ can be imported.
  */
+import type JSZip from "jszip";
 import { describeZodError, curseforgeManifestSchema } from "../schemas";
 import { PackImportError, type PackAnalysis, type PackEntry } from "../types";
 import { loaderFromName } from "./folder";
@@ -12,12 +13,19 @@ export const CURSEFORGE_UNRESOLVABLE =
   "CurseForge files cannot be downloaded in the browser (API key required); import from your CurseForge app instance folder instead";
 
 export async function analyzeCurseforgeZip(file: File): Promise<PackAnalysis> {
-  const zip = await loadPackZip(file, file.name);
+  return analyzeCurseforgeLoadedZip(await loadPackZip(file, file.name), file.name);
+}
+
+/** analyzeCurseforgeZip on a zip already loaded (`label`: its file name). */
+export async function analyzeCurseforgeLoadedZip(
+  zip: JSZip,
+  label: string,
+): Promise<PackAnalysis> {
   const raw = await readZipJson(zip, "manifest.json");
   if (raw === undefined) {
     throw new PackImportError(
       "INVALID_PACK",
-      `${file.name} is not a CurseForge pack: manifest.json is missing`,
+      `${label} is not a CurseForge pack: manifest.json is missing`,
     );
   }
   const parsed = curseforgeManifestSchema.safeParse(raw);

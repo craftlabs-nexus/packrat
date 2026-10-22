@@ -6,7 +6,7 @@
  * the plan checks each mod's download URL (downloadUrl.ts).
  */
 import { parse as parseToml } from "smol-toml";
-import { getErrorMessage } from "../utils";
+import { basename, getErrorMessage } from "../utils";
 import { currentPageProtocol, isMixedContent, parseWebUrl } from "../downloadUrl";
 import { isJarFilename } from "../jarScan";
 import { createLimiter } from "../limiter";
@@ -118,10 +118,6 @@ function parseTomlOrThrow(text: string, what: string): unknown {
       `${what} is not valid TOML: ${getErrorMessage(e)}`,
     );
   }
-}
-
-function basename(path: string): string {
-  return path.slice(path.lastIndexOf("/") + 1);
 }
 
 /**

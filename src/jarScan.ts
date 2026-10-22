@@ -5,6 +5,7 @@
  */
 import JSZip from "jszip";
 import { extractModMetadata } from "./modMetadata";
+import { basename } from "./utils";
 import type { LocalJarScan } from "./types";
 
 const CLASS_FILE = /\.class$/;
@@ -35,6 +36,6 @@ export async function scanJar(buffer: ArrayBuffer): Promise<LocalJarScan> {
  * (`x.jar.disabled`, `x.jar.old`, `x.jar.bak` don't end with `.jar`).
  */
 export function isJarFilename(name: string): boolean {
-  const base = name.split("/").pop() ?? name;
+  const base = basename(name);
   return base.length > 4 && !base.startsWith(".") && /\.jar$/i.test(base);
 }

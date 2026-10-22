@@ -35,11 +35,6 @@ export async function readZipJson(
   }
 }
 
-/** The basename of a zip path. */
-export function zipBasename(path: string): string {
-  return path.slice(path.lastIndexOf("/") + 1);
-}
-
 /**
  * Local entries for the JARs directly inside `<folder>/mods/` of a zip
  * (e.g. overrides/mods/*.jar), extracted to Files.
