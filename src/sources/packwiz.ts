@@ -14,6 +14,7 @@ import {
   describeZodError,
   indexTomlSchema,
   packTomlSchema,
+  safeRelativePath,
 } from "../schemas";
 import {
   PackImportError,
@@ -103,6 +104,24 @@ function basename(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1);
 }
 
+/**
+ * A pack file's URL: `path` must be a safe relative path (no `..`, no
+ * leading `/`, so no `//host`) and resolve to the pack.toml's origin
+ * (no absolute URL elsewhere); undefined otherwise.
+ */
+function packFileUrl(path: string, base: URL, packUrl: URL): URL | undefined {
+  if (!safeRelativePath.safeParse(path).success) return undefined;
+  let url: URL;
+  try {
+    url = new URL(path, base);
+  } catch {
+    return undefined;
+  }
+  return url.origin === packUrl.origin ? url : undefined;
+}
+
+export const OUTSIDE_THE_PACK = "outside the pack";
+
 export async function analyzePackwiz(
   packUrl: string,
   fetchImpl: FetchImpl = (input, init) => fetch(input, init),
@@ -119,7 +138,13 @@ export async function analyzePackwiz(
     );
   }
 
-  const indexUrl = new URL(pack.data.index.file, url);
+  const indexUrl = packFileUrl(pack.data.index.file, url, url);
+  if (!indexUrl) {
+    throw new PackImportError(
+      "INVALID_PACK",
+      `pack.toml's index file ${pack.data.index.file} is outside the pack`,
+    );
+  }
   const index = indexTomlSchema.safeParse(
     parseTomlOrThrow(await fetchText(fetchImpl, indexUrl.href), "index.toml"),
   );
@@ -136,9 +161,22 @@ export async function analyzePackwiz(
   for (const f of index.data.files) {
     const path = f.file.replace(/^\.\//, "");
     if (NON_MOD_FOLDERS.has(path.split("/")[0])) continue;
-    const fileUrl = new URL(path, indexUrl).href;
+    const isMetafile = f.metafile === true && path.endsWith(".pw.toml");
+    const isPackJar = !f.metafile && path.startsWith("mods/") && isJarFilename(path);
+    if (!isMetafile && !isPackJar) continue;
+    const fileUrl = packFileUrl(path, indexUrl, url)?.href;
+    if (!fileUrl) {
+      tasks.push(
+        Promise.resolve({
+          key: f.file,
+          filename: basename(path).replace(/\.pw\.toml$/, ""),
+          unresolvable: OUTSIDE_THE_PACK,
+        }),
+      );
+      continue;
+    }
 
-    if (f.metafile === true && path.endsWith(".pw.toml")) {
+    if (isMetafile) {
       tasks.push(
         limit(async (): Promise<PackEntry | undefined> => {
           let text: string;
@@ -173,7 +211,7 @@ export async function analyzePackwiz(
           return entry;
         }),
       );
-    } else if (!f.metafile && path.startsWith("mods/") && isJarFilename(path)) {
+    } else {
       // A JAR stored in the pack itself
       const entry: PackEntry = {
         key: fileUrl,

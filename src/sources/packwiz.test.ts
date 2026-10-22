@@ -158,6 +158,43 @@ describe("analyzePackwiz", () => {
     });
   });
 
+  it("refuses an index outside the pack", async () => {
+    for (const file of ["https://evil.example/index.toml", "//evil.example/index.toml", "../index.toml"]) {
+      const { fetchMock, calls } = stubFetch({
+        [`${BASE}/craftlabs/pack.toml`]: `[index]\nfile = "${file}"\n`,
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      await expect(analyzePackwiz(`${BASE}/craftlabs/pack.toml`)).rejects.toMatchObject({
+        code: "INVALID_PACK",
+        message: expect.stringMatching(/outside the pack/),
+      });
+      expect(calls).toEqual([`${BASE}/craftlabs/pack.toml`]);
+    }
+  });
+
+  it("does not fetch metafiles or JARs outside the pack", async () => {
+    const { fetchMock, calls } = stubFetch({
+      [`${BASE}/craftlabs/pack.toml`]: `[index]\nfile = "index.toml"\n`,
+      [`${BASE}/craftlabs/index.toml`]: [
+        "https://evil.example/mods/a.pw.toml",
+        "//evil.example/mods/b.pw.toml",
+        "../../mods/c.pw.toml",
+      ]
+        .map((f) => `[[files]]\nfile = "${f}"\nmetafile = true\n`)
+        .concat(`[[files]]\nfile = "mods/../../d.jar"\n`)
+        .join("\n"),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { entries } = await analyzePackwiz(`${BASE}/craftlabs/pack.toml`);
+    expect(entries.map((e) => [e.filename, e.unresolvable, e.origin])).toEqual([
+      ["a", "outside the pack", undefined],
+      ["b", "outside the pack", undefined],
+      ["c", "outside the pack", undefined],
+      ["d.jar", "outside the pack", undefined],
+    ]);
+    expect(calls).toEqual([`${BASE}/craftlabs/pack.toml`, `${BASE}/craftlabs/index.toml`]);
+  });
+
   it("reports CORS/network failures clearly", async () => {
     vi.stubGlobal(
       "fetch",
