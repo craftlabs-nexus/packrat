@@ -9,6 +9,7 @@ export {
   fromDropzoneFiles,
   fromFileList,
   type LocalFile,
+  type ModsFolderResult,
 } from "./sources/folder";
 export { analyzeMrpack } from "./sources/mrpack";
 export { analyzeCurseforgeZip } from "./sources/curseforge";
@@ -22,13 +23,26 @@ export { analyzePackwiz, validatePackUrl } from "./sources/packwiz";
 export {
   classifyDownloadUrl,
   currentPageProtocol,
+  describeBlockedDownload,
+  isInternalHost,
+  isMixedContent,
+  isPrivateIp,
   KNOWN_BLOCKED_HOSTS,
   KNOWN_GOOD_HOSTS,
+  parseWebUrl,
+  type BlockedReason,
   type ClassifyContext,
   type UrlVerdict,
 } from "./downloadUrl";
 export { createLimiter, type Limiter } from "./limiter";
-export { resolveModrinth, type ResolveResult } from "./modrinthResolve";
+export {
+  resolveModrinth,
+  type ResolveDeps,
+  type ResolvedModrinth,
+  type ResolveInput,
+  type ResolveOptions,
+  type ResolveResult,
+} from "./modrinthResolve";
 export {
   buildPlan,
   itemContentRule,
