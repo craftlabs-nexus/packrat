@@ -33,4 +33,13 @@ describe("createLimiter", () => {
     await expect(a).rejects.toThrow("boom");
     await expect(b).resolves.toBe("ok");
   });
+
+  it("frees the slot of a task that throws synchronously", async () => {
+    const limit = createLimiter(1);
+    const a = limit((() => {
+      throw new Error("sync");
+    }) as () => Promise<never>);
+    await expect(a).rejects.toThrow("sync");
+    await expect(limit(async () => "next")).resolves.toBe("next");
+  });
 });

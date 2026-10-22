@@ -19,7 +19,9 @@ export function createLimiter(n: number): Limiter {
     new Promise<T>((resolve, reject) => {
       queue.push(() => {
         active++;
-        task()
+        // A task that throws synchronously rejects instead of leaking its slot
+        Promise.resolve()
+          .then(task)
           .then(resolve, reject)
           .finally(() => {
             active--;
