@@ -7,6 +7,7 @@ import { getErrorMessage } from "./utils";
 import { trySha512Hex } from "./hashing";
 import {
   classifyDownloadUrl,
+  currentPageProtocol,
   describeBlockedDownload,
   describeBlockedGroup,
   type ClassifyContext,
@@ -67,13 +68,22 @@ export const itemContentRule: ContentRule = (s) => {
 };
 
 export interface BuildPlanContext {
-  existingSources: ExistingSource[];
-  availableVersions: BundledVersionRef[];
-  selectedBundledVersion: string;
+  /** JARs the consumer already holds (marked "already imported"). Default none. */
+  existingSources?: ExistingSource[];
+  /**
+   * The consumer's bundled vanilla data versions (CategoryCraft's model):
+   * without them the plan proposes no version action.
+   */
+  availableVersions?: BundledVersionRef[];
+  /** The bundled version in use (with availableVersions) */
+  selectedBundledVersion?: string;
   /** Version of an imported client JAR (it overrides the bundled data) */
   importedClientVersion?: string;
-  /** location.protocol: an https page can't download http:// files */
-  pageProtocol: string;
+  /**
+   * location.protocol: an https page can't download http:// files.
+   * Default: {@link currentPageProtocol}.
+   */
+  pageProtocol?: string;
   resolve?: (entries: PackEntry[]) => Promise<ResolveResult>;
   scan?: (buffer: ArrayBuffer) => Promise<LocalJarScan>;
   hash?: (buffer: ArrayBuffer) => Promise<string | undefined>;
@@ -96,7 +106,10 @@ export function sourceDisplayName(s: ExistingSource): string {
   );
 }
 
-/** Which bundled version to propose for the pack's Minecraft version. */
+/**
+ * Which bundled version to propose for the pack's Minecraft version;
+ * "none" without availableVersions.
+ */
 export function proposeVersionAction(
   minecraftVersion: string | undefined,
   ctx: Pick<
@@ -105,7 +118,7 @@ export function proposeVersionAction(
   >,
 ): VersionAction {
   const v = minecraftVersion;
-  if (!v) return { kind: "none" };
+  if (!v || !ctx.availableVersions) return { kind: "none" };
   if (ctx.importedClientVersion) {
     return {
       kind: "note",
@@ -118,7 +131,9 @@ export function proposeVersionAction(
   if (!match) {
     return {
       kind: "note",
-      text: `The pack targets Minecraft ${v}; there is no bundled data for it, keeping ${ctx.selectedBundledVersion}`,
+      text: ctx.selectedBundledVersion
+        ? `The pack targets Minecraft ${v}; there is no bundled data for it, keeping ${ctx.selectedBundledVersion}`
+        : `The pack targets Minecraft ${v}; there is no bundled data for it`,
     };
   }
   if (match.version === ctx.selectedBundledVersion) return { kind: "none" };
@@ -174,6 +189,7 @@ export async function buildPlan(
   const resolve = ctx.resolve ?? resolveModrinth;
   const contentRule = ctx.contentStatus === undefined ? itemContentRule : ctx.contentStatus;
   const skipClientOnly = ctx.skipClientOnly ?? true;
+  const existingSources = ctx.existingSources ?? [];
   const notes = [...(input.notes ?? [])];
 
   // 1. Local JARs: hash (the actual bytes win over a possibly stale .index
@@ -199,7 +215,7 @@ export async function buildPlan(
 
   // 2. Remote downloads: can the page fetch them? (static, no network)
   const urlCtx: ClassifyContext = {
-    pageProtocol: ctx.pageProtocol,
+    pageProtocol: ctx.pageProtocol ?? currentPageProtocol(),
     packOrigin: input.manifest.packOrigin,
   };
   const verdicts = new Map<string, UrlVerdict>();
@@ -267,19 +283,20 @@ export async function buildPlan(
         return { kind: "unresolvable", reason: unreadableReason };
       }
 
+      const sha512 = entry.sha512?.toLowerCase();
       const existing =
-        (entry.sha512 &&
-          ctx.existingSources.find((x) => x.sha512 === entry.sha512)) ||
+        (sha512 &&
+          existingSources.find((x) => x.sha512?.toLowerCase() === sha512)) ||
         (modrinth &&
-          ctx.existingSources.find(
+          existingSources.find(
             (x) => x.modrinthProjectId === modrinth.projectId,
           )) ||
         (s?.modId &&
-          ctx.existingSources.find(
-            (x) => x.type === "mod" && x.modId === s.modId,
+          existingSources.find(
+            (x) => (x.matchByModId ?? true) && x.modId === s.modId,
           )) ||
-        ctx.existingSources.find(
-          (x) => x.type !== "bundled" && x.filename === entry.filename,
+        existingSources.find(
+          (x) => (x.matchByFilename ?? true) && x.filename === entry.filename,
         );
       if (existing) {
         return {

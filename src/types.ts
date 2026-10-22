@@ -131,7 +131,10 @@ export type VersionAction =
 export interface ImportPlan {
   manifest: PackManifestInfo;
   rows: ReviewRow[];
-  /** Proposal for the bundled vanilla version */
+  /**
+   * Proposal for the consumer's bundled vanilla version; "none" unless the
+   * context gave availableVersions
+   */
   versionAction: VersionAction;
   /** Shown above the list (e.g. CurseForge limitation, Modrinth lookup failure) */
   notes: string[];
@@ -155,13 +158,15 @@ export class PackImportError extends Error {
 
 /**
  * What the plan needs to know about a JAR the consumer already holds, to
- * mark a pack entry "already imported": matched by sha512, then Modrinth
- * project, then (type "mod") mod id, then (any type but "bundled") filename.
+ * mark a pack entry "already imported": matched by sha512 (any case), then
+ * Modrinth project, then mod id, then filename.
  */
 export interface ExistingSource {
   filename: string;
-  /** The consumer's kind of source: "bundled" never matches by filename, "mod" matches by modId */
-  type?: string;
+  /** Match a pack JAR with the same mod id. Default true. */
+  matchByModId?: boolean;
+  /** Match a pack JAR with the same filename. Default true. */
+  matchByFilename?: boolean;
   modId?: string;
   sha512?: string;
   modrinthProjectId?: string;

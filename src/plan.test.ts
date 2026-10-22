@@ -40,7 +40,7 @@ function at(url: string, extra: Partial<PackEntry> = {}): PackEntry {
 }
 
 function source(overrides: Partial<ExistingSource>): ExistingSource {
-  return { filename: "existing.jar", type: "mod", ...overrides };
+  return { filename: "existing.jar", ...overrides };
 }
 
 const VERSIONS = [
@@ -136,6 +136,40 @@ describe("buildPlan", () => {
     expect(statusOf(plan, "m.jar")).toMatchObject({ reason: "already-imported", detail: "mmod" });
     expect(statusOf(plan, "f.jar")).toMatchObject({ reason: "already-imported", detail: "f" });
     expect(plan.rows.every((r) => !r.selectable)).toBe(true);
+  });
+
+  it("matches existing sources by mod id and filename only where they allow it", async () => {
+    const plan = await buildPlan(
+      analysis([local("m.jar"), local("f.jar")]),
+      ctx({
+        existingSources: [
+          source({ modId: "mmod", filename: "other.jar", matchByModId: false }),
+          source({ filename: "f.jar", matchByFilename: false }),
+        ],
+        scan: async (buffer) => ({
+          ...CODE_SCAN,
+          modId: new TextDecoder().decode(buffer) === "m.jar" ? "mmod" : undefined,
+        }),
+      }),
+    );
+    expect(statusOf(plan, "m.jar").kind).toBe("import");
+    expect(statusOf(plan, "f.jar").kind).toBe("import");
+  });
+
+  it("matches an existing source's sha512 in any case", async () => {
+    const plan = await buildPlan(
+      analysis([remote("r.jar", { sha512: "abcdef" })]),
+      ctx({ existingSources: [source({ sha512: "ABCDEF", displayName: "Upper" })] }),
+    );
+    expect(statusOf(plan, "r.jar")).toMatchObject({ reason: "already-imported", detail: "Upper" });
+  });
+
+  it("needs no bundled versions, existing sources or page protocol", async () => {
+    const plan = await buildPlan(analysis([remote("r.jar")], "26.2"), {
+      resolve: async () => ({ resolved: new Map() }),
+    });
+    expect(plan.versionAction).toEqual({ kind: "none" });
+    expect(statusOf(plan, "r.jar").kind).toBe("import");
   });
 
   it("skips the second copy of a mod in the pack", async () => {
@@ -497,6 +531,15 @@ describe("proposeVersionAction", () => {
   it("does nothing when already selected or no version is known", () => {
     expect(proposeVersionAction("26.3", base)).toEqual({ kind: "none" });
     expect(proposeVersionAction(undefined, base)).toEqual({ kind: "none" });
+  });
+
+  it("does nothing without availableVersions", () => {
+    expect(proposeVersionAction("26.2", {})).toEqual({ kind: "none" });
+    expect(proposeVersionAction("26.2", { importedClientVersion: "26.1" })).toEqual({ kind: "none" });
+    expect(proposeVersionAction("1.7.10", { availableVersions: VERSIONS })).toEqual({
+      kind: "note",
+      text: "The pack targets Minecraft 1.7.10; there is no bundled data for it",
+    });
   });
 
   it("notes a missing bundled version or an imported client", () => {
