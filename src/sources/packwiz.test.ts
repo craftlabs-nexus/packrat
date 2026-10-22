@@ -243,6 +243,53 @@ hash-format = "murmur2"
     });
   });
 
+  it("takes the page protocol: an http pack on an http page", async () => {
+    const http = "http://192.168.1.24/pack";
+    const { fetchMock, calls } = stubFetch({
+      [`${http}/pack.toml`]: `[index]\nfile = "index.toml"\n`,
+      [`${http}/index.toml`]: `[[files]]\nfile = "mods/a.jar"\n`,
+    });
+    await expect(analyzePackwiz(`${http}/pack.toml`, { fetch: fetchMock })).rejects.toThrow(/https/);
+    const { manifest, entries } = await analyzePackwiz(`${http}/pack.toml`, {
+      fetch: fetchMock,
+      pageProtocol: "http:",
+    });
+    expect(manifest.packOrigin).toBe("http://192.168.1.24");
+    expect(entries.map((e) => e.filename)).toEqual(["a.jar"]);
+    expect(calls).toEqual([`${http}/pack.toml`, `${http}/index.toml`]);
+  });
+
+  it("passes the signal on and rethrows an abort as it is", async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("pack.toml")) return new Response(`[index]\nfile = "index.toml"\n`);
+      if (url.endsWith("index.toml")) return new Response(`[[files]]\nfile = "mods/a.pw.toml"\nmetafile = true\n`);
+      expect(init?.signal).toBe(controller.signal);
+      controller.abort();
+      throw new DOMException("The operation was aborted.", "AbortError");
+    });
+    const error = await analyzePackwiz(`${BASE}/pack.toml`, { fetch: fetchMock, signal: controller.signal }).catch(
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(DOMException);
+    expect(error).toMatchObject({ name: "AbortError" });
+
+    // already aborted: nothing is fetched
+    fetchMock.mockClear();
+    await expect(
+      analyzePackwiz(`${BASE}/pack.toml`, { fetch: fetchMock, signal: controller.signal }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("still takes a bare fetch function", async () => {
+    const { fetchMock } = stubFetch({
+      [`${BASE}/pack.toml`]: `[index]\nfile = "index.toml"\n`,
+      [`${BASE}/index.toml`]: "",
+    });
+    await expect(analyzePackwiz(`${BASE}/pack.toml`, fetchMock)).resolves.toMatchObject({ entries: [] });
+  });
+
   it("reports HTTP errors and a missing index", async () => {
     const { fetchMock } = stubFetch({ [`${BASE}/pack.toml`]: FILES[`${BASE}/craftlabs/pack.toml`] });
     vi.stubGlobal("fetch", fetchMock);

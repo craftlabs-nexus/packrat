@@ -209,6 +209,23 @@ describe("analyzeFolder", () => {
   });
 });
 
+describe("analyzeFolder options", () => {
+  const files = [lf("a/mods/x.jar"), lf("b/mods/y.jar"), lf("b/mods/z.jar")];
+
+  it("takes { preferred, fallbackName } or the positional form", async () => {
+    const byOptions = await analyzeFolder(files, { preferred: "a/mods" });
+    const positional = await analyzeFolder(files, "a/mods");
+    expect(byOptions.manifest.modsFolder).toBe("a/mods");
+    expect(positional.manifest).toEqual(byOptions.manifest);
+    expect((await analyzeFolder(files)).manifest.modsFolder).toBe("b/mods");
+
+    const loose = [lf("x.jar")];
+    expect((await analyzeFolder(loose, { fallbackName: "Loose" })).manifest.name).toBe("Loose");
+    expect((await analyzeFolder(loose, undefined, "Loose")).manifest.name).toBe("Loose");
+    expect((await analyzeFolder(loose)).manifest.name).toBe("Mods folder");
+  });
+});
+
 describe("loaderFromName", () => {
   it("splits loader and version on the first dash", () => {
     expect(loaderFromName("fabric-0.16.9")).toEqual({ id: "fabric", version: "0.16.9" });

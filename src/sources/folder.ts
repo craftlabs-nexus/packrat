@@ -330,19 +330,29 @@ function folderDisplayName(modsFolder: string): string | undefined {
   return modsFolder.split("/").find((s) => s !== "" && !generic.has(s));
 }
 
+export interface AnalyzeFolderOptions {
+  /** The mods folder to use when it is a candidate (see findModsFolder) */
+  preferred?: string;
+  /** The pack name when neither instance files nor the path give one. Default "Mods folder". */
+  fallbackName?: string;
+}
+
 /**
  * Analyze a folder: entries for the chosen mods folder's JARs, with
  * Modrinth ids, side and hashes from a sibling `.index/*.pw.toml`, and the
- * pack name / Minecraft version / loader from instance files.
+ * pack name / Minecraft version / loader from instance files. The 0.1 form
+ * `analyzeFolder(files, preferred?, fallbackName?)` still works.
  */
 export async function analyzeFolder(
   files: LocalFile[],
-  preferredModsFolder?: string,
-  fallbackName = "Mods folder",
+  options?: AnalyzeFolderOptions | string,
+  fallbackName?: string,
 ): Promise<PackAnalysis> {
+  const opts: AnalyzeFolderOptions =
+    typeof options === "object" ? options : { preferred: options, fallbackName };
   const { modsFolder, candidates, jars, metaFiles } = findModsFolder(
     files,
-    preferredModsFolder,
+    opts.preferred,
   );
 
   const entries: PackEntry[] = jars.map((jar) => ({
@@ -366,7 +376,7 @@ export async function analyzeFolder(
   return {
     manifest: {
       kind: "folder",
-      name: info.name ?? folderDisplayName(modsFolder) ?? fallbackName,
+      name: info.name ?? folderDisplayName(modsFolder) ?? opts.fallbackName ?? "Mods folder",
       minecraftVersion: info.minecraftVersion,
       loader: info.loader,
       modsFolder,

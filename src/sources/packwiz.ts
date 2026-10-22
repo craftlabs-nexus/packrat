@@ -38,7 +38,16 @@ const NON_MOD_FOLDERS = new Set([
 
 const LOADER_KEYS: PackLoaderId[] = ["fabric", "neoforge", "forge", "quilt"];
 
-type FetchImpl = (input: string, init?: RequestInit) => Promise<Response>;
+export type FetchImpl = (input: string, init?: RequestInit) => Promise<Response>;
+
+export interface PackwizOptions {
+  /** Default: the global fetch */
+  fetch?: FetchImpl;
+  /** Cancels the analysis: the fetches are aborted and the abort error is rethrown as it is */
+  signal?: AbortSignal;
+  /** The page's protocol, for the pack URL check. Default: {@link currentPageProtocol} */
+  pageProtocol?: string;
+}
 
 /**
  * Accept http(s) URLs a page can fetch: https, or http on an http page
@@ -68,13 +77,24 @@ export function validatePackUrl(raw: string, pageProtocol = currentPageProtocol(
   return parsed.url;
 }
 
-async function fetchText(fetchImpl: FetchImpl, url: string): Promise<string> {
+function isAbort(e: unknown, signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true || (e instanceof Error && e.name === "AbortError");
+}
+
+async function fetchText(
+  fetchImpl: FetchImpl,
+  url: string,
+  signal: AbortSignal | undefined,
+): Promise<string> {
+  signal?.throwIfAborted();
   let response: Response;
   try {
     response = await fetchImpl(url, {
       headers: { Accept: "text/plain, */*" },
+      signal,
     });
-  } catch {
+  } catch (e) {
+    if (isAbort(e, signal)) throw e;
     throw new PackImportError(
       "FETCH_FAILED",
       `Could not fetch ${url}. The pack host must allow cross-origin requests (CORS) and be reachable.`,
@@ -122,14 +142,21 @@ function packFileUrl(path: string, base: URL, packUrl: URL): URL | undefined {
 
 export const OUTSIDE_THE_PACK = "outside the pack";
 
+/**
+ * Analyze a packwiz pack by its pack.toml URL. `options` is
+ * {@link PackwizOptions}; a bare fetch function (the 0.1 form) still works.
+ */
 export async function analyzePackwiz(
   packUrl: string,
-  fetchImpl: FetchImpl = (input, init) => fetch(input, init),
+  options: PackwizOptions | FetchImpl = {},
 ): Promise<PackAnalysis> {
-  const url = validatePackUrl(packUrl);
+  const opts = typeof options === "function" ? { fetch: options } : options;
+  const fetchImpl: FetchImpl = opts.fetch ?? ((input, init) => fetch(input, init));
+  const { signal } = opts;
+  const url = validatePackUrl(packUrl, opts.pageProtocol);
 
   const pack = packTomlSchema.safeParse(
-    parseTomlOrThrow(await fetchText(fetchImpl, url.href), "pack.toml"),
+    parseTomlOrThrow(await fetchText(fetchImpl, url.href, signal), "pack.toml"),
   );
   if (!pack.success) {
     throw new PackImportError(
@@ -146,7 +173,7 @@ export async function analyzePackwiz(
     );
   }
   const index = indexTomlSchema.safeParse(
-    parseTomlOrThrow(await fetchText(fetchImpl, indexUrl.href), "index.toml"),
+    parseTomlOrThrow(await fetchText(fetchImpl, indexUrl.href, signal), "index.toml"),
   );
   if (!index.success) {
     throw new PackImportError(
@@ -181,8 +208,9 @@ export async function analyzePackwiz(
         limit(async (): Promise<PackEntry | undefined> => {
           let text: string;
           try {
-            text = await fetchText(fetchImpl, fileUrl);
+            text = await fetchText(fetchImpl, fileUrl, signal);
           } catch (e) {
+            if (isAbort(e, signal)) throw e;
             return {
               key: fileUrl,
               filename: basename(path).replace(/\.pw\.toml$/, ""),

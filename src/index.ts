@@ -6,6 +6,7 @@ export { scanJar, isJarFilename } from "./jarScan";
 export {
   analyzeFolder,
   findModsFolder,
+  type AnalyzeFolderOptions,
   fromDropzoneFiles,
   fromFileList,
   type LocalFile,
@@ -19,7 +20,12 @@ export {
   detectPackZip,
   type PackZipKind,
 } from "./sources/detect";
-export { analyzePackwiz, validatePackUrl } from "./sources/packwiz";
+export {
+  analyzePackwiz,
+  validatePackUrl,
+  type FetchImpl,
+  type PackwizOptions,
+} from "./sources/packwiz";
 export {
   classifyDownloadUrl,
   currentPageProtocol,
