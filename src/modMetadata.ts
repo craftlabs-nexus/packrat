@@ -6,7 +6,6 @@
 
 import JSZip from "jszip";
 import { parse as parseToml } from "smol-toml";
-import { match, P } from "ts-pattern";
 import type { ModLoader } from "./types";
 
 /**
@@ -21,54 +20,11 @@ const METADATA_PATHS = {
   mcmodInfo: "mcmod.info",
 } as const;
 
-/**
- * Parsed content from a mod loader metadata file.
- * Each loader has its own structure, represented as a discriminated union.
- */
-type ParsedMetadata =
-  | { loader: "fabric"; data: FabricModJson }
-  | { loader: "quilt"; data: QuiltModJson }
-  | { loader: "forge"; data: ForgeModsToml }
-  | { loader: "neoforge"; data: NeoForgeModsToml };
-
-/** Fabric mod.json schema (simplified) */
-interface FabricModJson {
-  id?: string;
-  name?: string;
-  version?: string;
-  icon?: string;
-  depends?: { minecraft?: string };
+/** A loader's parsed metadata file (untrusted: every field is checked when read). */
+interface ParsedMetadata {
+  loader: ModLoader;
+  data: Record<string, unknown>;
 }
-
-/** Quilt mod.json schema (simplified) */
-interface QuiltModJson {
-  quilt_loader?: {
-    id?: string;
-    version?: string;
-    metadata?: {
-      name?: string;
-      icon?: string;
-    };
-    depends?: Array<{ id?: string; versions?: string }>;
-  };
-}
-
-/** Forge/NeoForge mods.toml schema (simplified) */
-interface ForgeModsToml {
-  logoFile?: string;
-  mods?: Array<{
-    modId?: string;
-    displayName?: string;
-    version?: string;
-  }>;
-  dependencies?: Record<
-    string,
-    Array<{ modId?: string; versionRange?: string }>
-  >;
-}
-
-// NeoForge uses same structure as Forge
-type NeoForgeModsToml = ForgeModsToml;
 
 /**
  * All metadata fields we can extract from a mod JAR.
@@ -84,25 +40,46 @@ export interface ModMetadata {
   version?: string;
   /** Path to icon file within the JAR */
   iconPath?: string;
-  /** Minecraft version requirement string */
+  /**
+   * Minecraft version requirement string. A list of alternatives (Fabric's
+   * and Quilt's "any of" arrays) is joined with ", ".
+   */
   minecraftVersions?: string;
+}
+
+function str(v: unknown): string | undefined {
+  return typeof v === "string" ? v : undefined;
+}
+
+function obj(v: unknown): Record<string, unknown> | undefined {
+  return typeof v === "object" && v !== null && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : undefined;
+}
+
+/** A version requirement: a string, or an array of alternatives joined with ", ". */
+function versionRequirement(v: unknown): string | undefined {
+  if (typeof v === "string") return v;
+  if (!Array.isArray(v)) return undefined;
+  const alternatives = v.filter((x): x is string => typeof x === "string");
+  return alternatives.length > 0 ? alternatives.join(", ") : undefined;
 }
 
 /**
  * Load and parse a metadata file from a JAR.
- * Returns undefined if file doesn't exist or fails to parse.
+ * Returns undefined if file doesn't exist, fails to parse or is not an object.
  */
 async function loadMetadataFile(
   zip: JSZip,
   path: string,
   format: "json" | "toml"
-): Promise<unknown | undefined> {
+): Promise<Record<string, unknown> | undefined> {
   const file = zip.file(path);
   if (!file) return undefined;
 
   try {
     const content = await file.async("string");
-    return format === "json" ? JSON.parse(content) : parseToml(content);
+    return obj(format === "json" ? JSON.parse(content) : parseToml(content));
   } catch {
     return undefined;
   }
@@ -113,8 +90,6 @@ async function loadMetadataFile(
  * Returns array of parsed metadata with their loader type.
  */
 async function loadAllMetadata(zip: JSZip): Promise<ParsedMetadata[]> {
-  const results: ParsedMetadata[] = [];
-
   // Load all metadata files in parallel
   const [fabric, quilt, forge, neoforge] = await Promise.all([
     loadMetadataFile(zip, METADATA_PATHS.fabric, "json"),
@@ -123,124 +98,60 @@ async function loadAllMetadata(zip: JSZip): Promise<ParsedMetadata[]> {
     loadMetadataFile(zip, METADATA_PATHS.neoforge, "toml"),
   ]);
 
-  if (fabric) results.push({ loader: "fabric", data: fabric as FabricModJson });
-  if (quilt) results.push({ loader: "quilt", data: quilt as QuiltModJson });
-  if (forge) results.push({ loader: "forge", data: forge as ForgeModsToml });
-  if (neoforge)
-    results.push({ loader: "neoforge", data: neoforge as NeoForgeModsToml });
-
+  const results: ParsedMetadata[] = [];
+  if (fabric) results.push({ loader: "fabric", data: fabric });
+  if (quilt) results.push({ loader: "quilt", data: quilt });
+  if (forge) results.push({ loader: "forge", data: forge });
+  if (neoforge) results.push({ loader: "neoforge", data: neoforge });
   return results;
 }
 
-/**
- * Extract mod ID from parsed metadata using ts-pattern.
- */
-function extractModId(meta: ParsedMetadata): string | undefined {
-  return match(meta)
-    .with({ loader: "fabric", data: { id: P.string } }, ({ data }) => data.id)
-    .with(
-      { loader: "quilt", data: { quilt_loader: { id: P.string } } },
-      ({ data }) => data.quilt_loader?.id
-    )
-    .with(
-      { loader: P.union("forge", "neoforge"), data: { mods: P.array() } },
-      ({ data }) => {
-        const first = data.mods?.[0];
-        return typeof first?.modId === "string" ? first.modId : undefined;
+/** The fields of one metadata file (Forge and NeoForge share mods.toml's shape). */
+function fieldsOf(meta: ParsedMetadata): Omit<ModMetadata, "loaders"> {
+  const { data } = meta;
+  switch (meta.loader) {
+    case "fabric":
+      return {
+        modId: str(data.id),
+        displayName: str(data.name),
+        version: str(data.version),
+        // an icon map (size -> path) is not read
+        iconPath: str(data.icon),
+        minecraftVersions: versionRequirement(obj(data.depends)?.minecraft),
+      };
+    case "quilt": {
+      const loader = obj(data.quilt_loader);
+      const metadata = obj(loader?.metadata);
+      const depends = Array.isArray(loader?.depends) ? loader.depends : [];
+      const minecraft = depends.map(obj).find((d) => d?.id === "minecraft");
+      return {
+        modId: str(loader?.id),
+        displayName: str(metadata?.name),
+        version: str(loader?.version),
+        iconPath: str(metadata?.icon),
+        minecraftVersions: versionRequirement(minecraft?.versions),
+      };
+    }
+    case "forge":
+    case "neoforge": {
+      const first = Array.isArray(data.mods) ? obj(data.mods[0]) : undefined;
+      // The minecraft dependency in any mod's dependencies
+      let minecraftVersions: string | undefined;
+      for (const modDeps of Object.values(obj(data.dependencies) ?? {})) {
+        if (!Array.isArray(modDeps)) continue;
+        const mc = modDeps.map(obj).find((d) => d?.modId === "minecraft");
+        minecraftVersions = str(mc?.versionRange);
+        if (minecraftVersions) break;
       }
-    )
-    .otherwise(() => undefined);
-}
-
-/**
- * Extract display name from parsed metadata using ts-pattern.
- */
-function extractDisplayName(meta: ParsedMetadata): string | undefined {
-  return match(meta)
-    .with({ loader: "fabric", data: { name: P.string } }, ({ data }) => data.name)
-    .with(
-      { loader: "quilt", data: { quilt_loader: { metadata: { name: P.string } } } },
-      ({ data }) => data.quilt_loader?.metadata?.name
-    )
-    .with(
-      { loader: P.union("forge", "neoforge"), data: { mods: P.array() } },
-      ({ data }) => {
-        const first = data.mods?.[0];
-        return typeof first?.displayName === "string"
-          ? first.displayName
-          : undefined;
-      }
-    )
-    .otherwise(() => undefined);
-}
-
-/**
- * Extract version from parsed metadata using ts-pattern.
- */
-function extractVersion(meta: ParsedMetadata): string | undefined {
-  return match(meta)
-    .with(
-      { loader: "fabric", data: { version: P.string } },
-      ({ data }) => data.version
-    )
-    .with(
-      { loader: "quilt", data: { quilt_loader: { version: P.string } } },
-      ({ data }) => data.quilt_loader?.version
-    )
-    .with(
-      { loader: P.union("forge", "neoforge"), data: { mods: P.array() } },
-      ({ data }) => {
-        const first = data.mods?.[0];
-        return typeof first?.version === "string" ? first.version : undefined;
-      }
-    )
-    .otherwise(() => undefined);
-}
-
-/**
- * Extract icon path from parsed metadata using ts-pattern.
- */
-function extractIconPath(meta: ParsedMetadata): string | undefined {
-  return match(meta)
-    .with({ loader: "fabric", data: { icon: P.string } }, ({ data }) => data.icon)
-    .with(
-      { loader: "quilt", data: { quilt_loader: { metadata: { icon: P.string } } } },
-      ({ data }) => data.quilt_loader?.metadata?.icon
-    )
-    .with(
-      { loader: P.union("forge", "neoforge"), data: { logoFile: P.string } },
-      ({ data }) => data.logoFile
-    )
-    .otherwise(() => undefined);
-}
-
-/**
- * Extract Minecraft version requirement from parsed metadata using ts-pattern.
- */
-function extractMinecraftVersions(meta: ParsedMetadata): string | undefined {
-  return match(meta)
-    .with(
-      { loader: "fabric", data: { depends: { minecraft: P.select() } } },
-      (mc) => (typeof mc === "string" ? mc : String(mc))
-    )
-    .with({ loader: "quilt", data: { quilt_loader: { depends: P.array() } } }, ({ data }) => {
-      const mcDep = data.quilt_loader?.depends?.find((d) => d.id === "minecraft");
-      return mcDep?.versions ? String(mcDep.versions) : undefined;
-    })
-    .with(
-      { loader: P.union("forge", "neoforge"), data: { dependencies: P.select() } },
-      (deps) => {
-        if (!deps || typeof deps !== "object") return undefined;
-        // Find minecraft dependency in any mod's dependencies
-        for (const modDeps of Object.values(deps)) {
-          if (!Array.isArray(modDeps)) continue;
-          const mcDep = modDeps.find((d) => d.modId === "minecraft");
-          if (mcDep?.versionRange) return String(mcDep.versionRange);
-        }
-        return undefined;
-      }
-    )
-    .otherwise(() => undefined);
+      return {
+        modId: str(first?.modId),
+        displayName: str(first?.displayName),
+        version: str(first?.version),
+        iconPath: str(data.logoFile),
+        minecraftVersions,
+      };
+    }
+  }
 }
 
 /**
@@ -267,45 +178,35 @@ export async function extractModMetadata(zip: JSZip): Promise<ModMetadata> {
   );
 
   // Extract each field from the first source that has it
-  let modId: string | undefined;
-  let displayName: string | undefined;
-  let version: string | undefined;
-  let iconPath: string | undefined;
-  let minecraftVersions: string | undefined;
-
+  const result: ModMetadata = { loaders };
   for (const meta of sortedMeta) {
-    modId ??= extractModId(meta);
-    displayName ??= extractDisplayName(meta);
-    version ??= extractVersion(meta);
-    iconPath ??= extractIconPath(meta);
-    minecraftVersions ??= extractMinecraftVersions(meta);
+    const fields = fieldsOf(meta);
+    result.modId ??= fields.modId;
+    result.displayName ??= fields.displayName;
+    result.version ??= fields.version;
+    result.iconPath ??= fields.iconPath;
+    result.minecraftVersions ??= fields.minecraftVersions;
   }
-
-  return {
-    loaders,
-    modId,
-    displayName,
-    version,
-    iconPath,
-    minecraftVersions,
-  };
+  return result;
 }
 
 /**
  * Check if a JAR contains any mod loader metadata files.
  */
 export function isModJar(zip: JSZip): boolean {
-  return (
-    zip.file(METADATA_PATHS.fabric) !== null ||
-    zip.file(METADATA_PATHS.quilt) !== null ||
-    zip.file(METADATA_PATHS.forge) !== null ||
-    zip.file(METADATA_PATHS.neoforge) !== null ||
-    zip.file(METADATA_PATHS.mcmodInfo) !== null
-  );
+  return Object.values(METADATA_PATHS).some((path) => zip.file(path) !== null);
 }
 
+const ICON_MIME_TYPES: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+};
+
 /**
- * Load icon from JAR and convert to base64 data URL.
+ * Load icon from JAR and convert to base64 data URL (PNG unless the
+ * extension says JPEG or GIF).
  */
 export async function loadIconFromJar(
   zip: JSZip,
@@ -316,16 +217,10 @@ export async function loadIconFromJar(
 
   try {
     const iconData = await iconFile.async("base64");
-    const ext = iconPath.split(".").pop()?.toLowerCase();
-    const mimeType = match(ext)
-      .with("png", () => "image/png")
-      .with("jpg", () => "image/jpeg")
-      .with("jpeg", () => "image/jpeg")
-      .with("gif", () => "image/gif")
-      .otherwise(() => "image/png");
+    const ext = iconPath.split(".").pop()?.toLowerCase() ?? "";
+    const mimeType = ICON_MIME_TYPES[ext] ?? "image/png";
     return `data:${mimeType};base64,${iconData}`;
   } catch {
     return undefined;
   }
 }
-
