@@ -435,6 +435,28 @@ describe("runImport", () => {
     });
   });
 
+  it("a blocked host costs up to downloadConcurrency requests (the window starts first)", async () => {
+    const download = vi.fn(async (url: string, filename: string) => {
+      await new Promise((r) => setTimeout(r, 1));
+      if (url.startsWith("https://files.example/")) throw new TypeError("Failed to fetch");
+      return new File([filename], filename);
+    });
+    const rows = ["a", "b", "c", "d", "e"].map((n) => row(`${n}.jar`, { urls: [`https://files.example/${n}.jar`] }));
+    const summary = await runImport(rows, deps({ download }), {
+      signal: new AbortController().signal,
+      downloadConcurrency: 3,
+    });
+    expect(download.mock.calls.map((c) => c[0])).toEqual([
+      "https://files.example/a.jar",
+      "https://files.example/b.jar",
+      "https://files.example/c.jar",
+    ]);
+    expect(summary.failed.map((f) => f.key)).toEqual(["a.jar"]);
+    expect(summary.skipped.map((s) => [s.key, s.reason])).toEqual(
+      ["b", "c", "d", "e"].map((n) => [`${n}.jar`, "host-blocked"]),
+    );
+  });
+
   it("offline: the first row on each host fails, prefetched rows are skipped", async () => {
     const d = deps({
       download: vi.fn(async () => {

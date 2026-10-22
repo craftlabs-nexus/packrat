@@ -207,6 +207,40 @@ describe("analyzeFolder", () => {
     expect(plain.manifest.name).toBe("MyPack");
     expect(plain.manifest.minecraftVersion).toBeUndefined();
   });
+
+  it("reads an ATLauncher instance.json", async () => {
+    const { manifest } = await analyzeFolder([
+      lf("instances/AT/mods/a.jar"),
+      lf("instances/AT/instance.json", JSON.stringify({ minecraftVersion: "1.20.1", launcher: { name: "AT Pack" } })),
+    ]);
+    expect(manifest).toMatchObject({ name: "AT Pack", minecraftVersion: "1.20.1" });
+  });
+
+  it("reads a Modrinth app profile.json, old and new layouts", async () => {
+    const nested = await analyzeFolder([
+      lf("profiles/M/mods/a.jar"),
+      lf("profiles/M/profile.json", JSON.stringify({ metadata: { name: "Modrinth Pack", game_version: "26.2" } })),
+    ]);
+    expect(nested.manifest).toMatchObject({ name: "Modrinth Pack", minecraftVersion: "26.2" });
+    const flat = await analyzeFolder([
+      lf("profiles/N/mods/a.jar"),
+      lf("profiles/N/profile.json", JSON.stringify({ name: "Flat", game_version: "26.1" })),
+    ]);
+    expect(flat.manifest).toMatchObject({ name: "Flat", minecraftVersion: "26.1" });
+  });
+
+  it("lets the nearest instance file win over one further up", async () => {
+    const { manifest } = await analyzeFolder([
+      lf("all/inst/.minecraft/mods/a.jar"),
+      lf("all/instance.cfg", "name=Outer\n"),
+      lf("all/mmc-pack.json", JSON.stringify({ components: [{ uid: "net.minecraft", version: "1.7.10" }] })),
+      lf("all/inst/instance.cfg", "name=Inner\n"),
+      lf("all/inst/mmc-pack.json", JSON.stringify({ components: [{ uid: "net.minecraft", version: "26.2" }] })),
+      // not an ancestor of the mods folder: ignored
+      lf("all/other/instance.cfg", "name=Other\n"),
+    ]);
+    expect(manifest).toMatchObject({ name: "Inner", minecraftVersion: "26.2" });
+  });
 });
 
 describe("analyzeFolder options", () => {
