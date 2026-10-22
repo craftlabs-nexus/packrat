@@ -1,5 +1,5 @@
 {
-  "name": "@craftlabs-nexus/packrat",
+  "name": "@craftlabs/packrat",
   "version": "0.2.0",
   "description": "Reads a Minecraft modpack from wherever it is (a launcher instance or mods folder, a Modrinth .mrpack, a CurseForge zip, a packwiz URL), resolves its files on Modrinth and plans and runs the import, all in the browser.",
   "license": "MIT",

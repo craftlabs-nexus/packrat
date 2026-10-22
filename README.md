@@ -57,7 +57,7 @@ Also exported: `extractModMetadata` (Fabric, Quilt, Forge and NeoForge metadata 
 CategoryCraft (items: the default content rule, its bundled vanilla data, its own store):
 
 ```ts
-import { analyzeFolder, buildPlan, fromFileList, runImport } from "@craftlabs-nexus/packrat";
+import { analyzeFolder, buildPlan, fromFileList, runImport } from "@craftlabs/packrat";
 
 const analysis = await analyzeFolder(fromFileList(input.files));
 const plan = await buildPlan(analysis, {
@@ -89,7 +89,7 @@ const summary = await runImport(plan.rows, {
 Blockscope (a resource pack from the user's mods: client mods included, nothing about items):
 
 ```ts
-import { analyzePackwiz, buildPlan, fetchRows } from "@craftlabs-nexus/packrat";
+import { analyzePackwiz, buildPlan, fetchRows } from "@craftlabs/packrat";
 
 const analysis = await analyzePackwiz(packUrl, { signal });
 const plan = await buildPlan(analysis, {
