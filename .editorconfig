@@ -1,0 +1,19 @@
+# Editor settings (https://editorconfig.org), describing what the files already do: two spaces, LF.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# a trailing double space is a Markdown line break
+[*.md]
+trim_trailing_whitespace = false
+
+# written by npm: leave it as written
+[package-lock.json]
+insert_final_newline = unset
+trim_trailing_whitespace = unset
