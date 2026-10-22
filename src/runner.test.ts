@@ -393,6 +393,73 @@ describe("runImport", () => {
     expect(summary.skipped).toEqual([{ key: "dup.jar", filename: "dup.jar", reason: "already-imported" }]);
   });
 
+  it("cancels on the signal whatever the download rejects with", async () => {
+    const controller = new AbortController();
+    const d = deps({
+      download: vi.fn(
+        (_u: string, _f: string, o: { signal: AbortSignal }) =>
+          new Promise<File>((_resolve, reject) => {
+            // rejects with the abort reason: here an Error, not an AbortError
+            o.signal.addEventListener("abort", () => reject(o.signal.reason));
+            setTimeout(() => controller.abort(new Error("stopped by the user")), 1);
+          }),
+      ),
+    });
+    const summary = await runImport([row("a.jar", { remote: true }), row("b.jar", { remote: true })], d, {
+      signal: controller.signal,
+      onRow: () => {},
+    });
+    expect(summary).toMatchObject({ cancelled: true, notRun: 2, failed: [], imported: 0 });
+
+    const controller2 = new AbortController();
+    const summary2 = await runImport(
+      [row("c.jar", { remote: true })],
+      deps({
+        download: vi.fn(async () => {
+          controller2.abort();
+          throw new Error("socket closed");
+        }),
+      }),
+      { signal: controller2.signal, onRow: () => {} },
+    );
+    expect(summary2).toMatchObject({ cancelled: true, notRun: 1, failed: [] });
+  });
+
+  it("rejects with a real DOMException AbortError and counts it as cancelled", async () => {
+    const controller = new AbortController();
+    const d = deps({
+      download: vi.fn(async () => {
+        controller.abort();
+        throw new DOMException("The operation was aborted.", "AbortError");
+      }),
+    });
+    const summary = await runImport([row("a.jar", { remote: true })], d, {
+      signal: controller.signal,
+      onRow: () => {},
+    });
+    expect(summary).toMatchObject({ cancelled: true, notRun: 1, failed: [] });
+  });
+
+  it("runs nothing when the signal is already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const d = deps();
+    const { events, onRow } = collect();
+    const summary = await runImport([row("a.jar"), row("b.jar", { remote: true })], d, {
+      signal: controller.signal,
+      onRow,
+    });
+    expect(summary).toMatchObject({ cancelled: true, notRun: 2, imported: 0, failed: [] });
+    expect(d.download).not.toHaveBeenCalled();
+    expect(d.extract).not.toHaveBeenCalled();
+    expect(events.map(([k, p]) => [k, p.phase])).toEqual([
+      ["a.jar", "queued"],
+      ["b.jar", "queued"],
+      ["a.jar", "cancelled"],
+      ["b.jar", "cancelled"],
+    ]);
+  });
+
   it("cancels the remaining rows; committed sources stay", async () => {
     const controller = new AbortController();
     const d = deps({

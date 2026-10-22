@@ -8,7 +8,11 @@
  * A download that fails to connect (CORS or offline: fetch's TypeError)
  * tries the file's altUrls, and trips a per-host breaker: the first row on
  * that host is reported failed, later rows on it are skipped ("host-blocked")
- * without another request.
+ * without another request. Any TypeError the download rejects with trips
+ * it, so a `download` should reject with another error type for HTTP errors.
+ *
+ * Cancellation is the signal, not an error's name: once it has fired, a
+ * failed download (whatever it rejected with) cancels its row.
  */
 import { getErrorMessage } from "./utils";
 import type { ExtractedJar, ImportMetadata, PackEntry, ReviewRow, SkipReason } from "./types";
@@ -96,13 +100,6 @@ type Fetched =
   | { ok: true; buffer: ArrayBuffer }
   /** hosts: every URL's host, when none of them could connect */
   | { ok: false; error: unknown; hosts?: string[] };
-
-function isAbort(e: unknown): boolean {
-  return (
-    (e instanceof Error && e.name === "DownloadAbortedError") ||
-    (e instanceof DOMException && e.name === "AbortError")
-  );
-}
 
 function rowFilename(entry: PackEntry): string {
   return entry.filename;
@@ -206,7 +203,7 @@ export async function runImport<R extends ExtractedJar>(
             });
             return { ok: true, buffer: await file.arrayBuffer() };
           } catch (e) {
-            if (isAbort(e) && signal.aborted) throw e;
+            if (signal.aborted) throw e;
             firstError ??= e;
             if (e instanceof TypeError) tripped.add(host);
             else connectFailures = false;
@@ -244,7 +241,7 @@ export async function runImport<R extends ExtractedJar>(
     next = i + 1;
 
     if (!fetched.ok) {
-      if (isAbort(fetched.error) && signal.aborted) {
+      if (signal.aborted) {
         i--; // re-enter the loop top, which marks this and the rest cancelled
         continue;
       }
