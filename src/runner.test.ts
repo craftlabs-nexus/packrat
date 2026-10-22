@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { runImport, type RowProgress, type RunnerDeps } from "./runner";
+import { fetchRows, runImport, type FetchedRow, type RowProgress, type RunnerDeps } from "./runner";
 import type { ExpectedHashes } from "./hashing";
-import type { ExtractedJar } from "./types";
 
 /** CategoryCraft's extraction error, as the runner's default recognizes it. */
 class JarValidationError extends Error {
@@ -13,8 +12,10 @@ class JarValidationError extends Error {
   }
 }
 
-/** The shape of CategoryCraft's extraction result that the runner reads. */
-interface TestResult extends ExtractedJar {
+/** The shape of CategoryCraft's extraction result (the runner never reads it). */
+interface TestResult {
+  hasCode: boolean;
+  data: { items: unknown[]; tags: Record<string, unknown> };
   filename: string;
   type: string;
   namespaces: string[];
@@ -81,8 +82,7 @@ function deps(overrides: Partial<RunnerDeps<TestResult>> = {}): RunnerDeps<TestR
     extract: vi.fn(async () => result(2)),
     commit: vi.fn(async (r: TestResult) => ({
       status: "added" as const,
-      itemCount: r.data.items.length,
-      tagCount: Object.keys(r.data.tags).length,
+      counts: { items: r.data.items.length, tags: Object.keys(r.data.tags).length },
     })),
     // the bytes of a test file are its name; its "hash" is h-<name>
     verify: vi.fn(async (buffer: ArrayBuffer, expected: ExpectedHashes) => {
@@ -122,8 +122,7 @@ describe("runImport", () => {
 
     expect(summary).toEqual({
       imported: 2,
-      items: 4,
-      tags: 2,
+      counts: { items: 4, tags: 2 },
       skipped: [],
       failed: [],
       notRun: 0,
@@ -131,7 +130,6 @@ describe("runImport", () => {
     });
     expect((d.extract as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[1])).toEqual(["a.jar", "b.jar"]);
     expect((d.commit as ReturnType<typeof vi.fn>).mock.calls[1][1]).toEqual({
-      importSource: "pack",
       packName: "Pack",
       sha512: "h-b.jar",
       hashVerified: false,
@@ -146,6 +144,10 @@ describe("runImport", () => {
       "extracting",
       "done",
     ]);
+    expect(events.find(([k, p]) => k === "b.jar" && p.phase === "done")?.[1]).toEqual({
+      phase: "done",
+      counts: { items: 2, tags: 1 },
+    });
   });
 
   it("reports unselected and plan-skipped rows in the summary without running them", async () => {
@@ -196,39 +198,90 @@ describe("runImport", () => {
     expect(peak).toBeGreaterThan(1);
   });
 
-  it("counts NO_CONTENT and empty results as skipped (no items), not failed", async () => {
+  it("skips a JAR whose extraction says NO_CONTENT (no items), not failed", async () => {
     const d = deps({
       extract: vi.fn(async (_b: ArrayBuffer, name: string) => {
         if (name === "lib.jar") throw new JarValidationError("nothing", "NO_CONTENT");
-        if (name === "datapack.jar") return result(0, 3, false);
-        if (name === "empty.jar") return result(0, 0);
         return result(1);
       }),
     });
-    const summary = await runImport(
-      [row("lib.jar"), row("datapack.jar"), row("empty.jar"), row("ok.jar")],
-      d,
-      { signal: new AbortController().signal, onRow: () => {} },
-    );
-    expect(summary.imported).toBe(1);
-    expect(summary.failed).toEqual([]);
-    expect(summary.skipped.map((s) => [s.filename, s.reason])).toEqual([
-      ["lib.jar", "no-items"],
-      ["datapack.jar", "no-items"],
-      ["empty.jar", "no-items"],
-    ]);
-    expect(d.commit).toHaveBeenCalledTimes(1);
-  });
-
-  it("imports a mod with code and item tags but no items (tags only)", async () => {
-    const d = deps({ extract: vi.fn(async () => result(0, 3)) });
-    const summary = await runImport([row("chains.jar")], d, {
+    const summary = await runImport([row("lib.jar"), row("ok.jar")], d, {
       signal: new AbortController().signal,
       onRow: () => {},
     });
     expect(summary.imported).toBe(1);
-    expect(summary.skipped).toEqual([]);
+    expect(summary.failed).toEqual([]);
+    expect(summary.skipped).toEqual([{ key: "lib.jar", filename: "lib.jar", reason: "no-items" }]);
     expect(d.commit).toHaveBeenCalledTimes(1);
+  });
+
+  it("takes the caller's isNoContent", async () => {
+    const d = deps({
+      extract: vi.fn(async () => {
+        throw "empty";
+      }),
+      isNoContent: (e) => e === "empty",
+    });
+    const summary = await runImport([row("a.jar")], d, { signal: new AbortController().signal });
+    expect(summary.skipped).toEqual([{ key: "a.jar", filename: "a.jar", reason: "no-items" }]);
+    // the default does not recognise another error as "no content"
+    const failed = await runImport([row("b.jar")], deps({ extract: d.extract }), {
+      signal: new AbortController().signal,
+    });
+    expect(failed.failed).toEqual([{ key: "b.jar", filename: "b.jar", error: "empty" }]);
+  });
+
+  it("commits whatever extract returns and reports a skip commit decides", async () => {
+    const commit = vi.fn(async (r: TestResult) =>
+      r.data.items.length === 0
+        ? { status: "skipped" as const, reason: "no items" }
+        : { status: "added" as const },
+    );
+    const { events, onRow } = collect();
+    const summary = await runImport(
+      [row("empty.jar"), row("quiet.jar")],
+      deps({
+        extract: vi.fn(async (_b: ArrayBuffer, name: string) => result(name === "empty.jar" ? 0 : 1, 0, false)),
+        commit,
+      }),
+      { signal: new AbortController().signal, onRow },
+    );
+    expect(commit).toHaveBeenCalledTimes(2);
+    expect(summary).toMatchObject({
+      imported: 1,
+      counts: {},
+      skipped: [{ key: "empty.jar", filename: "empty.jar", reason: "commit-skipped", detail: "no items" }],
+    });
+    expect(events.find(([k, p]) => k === "empty.jar" && p.phase === "skipped")?.[1]).toEqual({
+      phase: "skipped",
+      reason: "no items",
+    });
+    expect(events.find(([k, p]) => k === "quiet.jar" && p.phase === "done")?.[1]).toEqual({
+      phase: "done",
+      counts: {},
+    });
+  });
+
+  it("fails a row whose extract or commit throws a non-Error value", async () => {
+    const summary = await runImport(
+      [row("a.jar"), row("b.jar"), row("c.jar")],
+      deps({
+        extract: vi.fn(async (_b: ArrayBuffer, name: string) => {
+          if (name === "a.jar") throw { code: 1 };
+          return result(name === "b.jar" ? 2 : 1);
+        }),
+        commit: vi.fn(async (r: TestResult) => {
+          if (r.data.items.length === 2) throw "disk full";
+          return { status: "added" as const };
+        }),
+      }),
+      { signal: new AbortController().signal },
+    );
+    expect(summary.failed).toEqual([
+      { key: "a.jar", filename: "a.jar", error: "Unknown error" },
+      { key: "b.jar", filename: "b.jar", error: "disk full" },
+    ]);
+    expect(summary.imported).toBe(1);
   });
 
   it("fails rows with a hash mismatch, extraction errors or blocked downloads", async () => {
@@ -431,7 +484,7 @@ describe("runImport", () => {
 
   it("skips a duplicate found at commit time", async () => {
     const d = deps({
-      commit: vi.fn(async () => ({ status: "duplicate" as const, itemCount: 0, tagCount: 0 })),
+      commit: vi.fn(async () => ({ status: "duplicate" as const })),
     });
     const summary = await runImport([row("dup.jar")], d, {
       signal: new AbortController().signal,
@@ -512,7 +565,7 @@ describe("runImport", () => {
     const d = deps({
       commit: vi.fn(async (r: TestResult) => {
         controller.abort(); // the user cancels while the first row commits
-        return { status: "added" as const, itemCount: r.data.items.length, tagCount: 0 };
+        return { status: "added" as const, counts: { items: r.data.items.length } };
       }),
       download: vi.fn(
         (_u: string, filename: string, o: { signal: AbortSignal }) =>
@@ -538,5 +591,59 @@ describe("runImport", () => {
     expect(summary.notRun).toBe(2);
     expect(summary.failed).toEqual([]);
     expect(events.filter(([, p]) => p.phase === "cancelled").map(([k]) => k)).toEqual(["b.jar", "c.jar"]);
+  });
+});
+
+describe("fetchRows", () => {
+  it("yields verified bytes in plan order and summarises the rest", async () => {
+    const download = vi.fn(async (url: string, filename: string) => {
+      if (url.includes("down")) throw new Error("Download failed: 500");
+      return new File([filename], filename);
+    });
+    const rows = [
+      row("a.jar", { remote: true, sha512: "h-a.jar" }),
+      row("bad.jar", { remote: true, sha512: "nope" }),
+      row("down.jar", { urls: ["https://down.example/x.jar"] }),
+      row("local.jar"),
+      row("off.jar", { selected: false }),
+    ];
+    const run = fetchRows(rows, deps({ download }), { signal: new AbortController().signal });
+    const got: FetchedRow[] = [];
+    for await (const f of run) got.push(f);
+    expect(got.map((f) => [f.row.entry.key, new TextDecoder().decode(f.buffer), f.hashVerified, f.sha512])).toEqual([
+      ["a.jar", "a.jar", true, "h-a.jar"],
+      ["local.jar", "local.jar", false, "h-local.jar"],
+    ]);
+    expect(run.summary).toEqual({
+      skipped: [{ key: "off.jar", filename: "off.jar", reason: "not-selected" }],
+      failed: [
+        { key: "bad.jar", filename: "bad.jar", error: "hash mismatch" },
+        { key: "down.jar", filename: "down.jar", error: "Download failed: 500" },
+      ],
+      notRun: 0,
+      cancelled: false,
+    });
+  });
+
+  it("aborts the downloads in flight when the caller stops early", async () => {
+    const aborted: string[] = [];
+    const download = vi.fn(
+      (_u: string, filename: string, o: { signal: AbortSignal }) =>
+        new Promise<File>((resolve) => {
+          if (filename === "a.jar") return resolve(new File([filename], filename));
+          o.signal.addEventListener("abort", () => {
+            aborted.push(filename);
+            resolve(new File([filename], filename));
+          });
+        }),
+    );
+    const rows = ["a", "b", "c"].map((n) => row(`${n}.jar`, { remote: true }));
+    const outer = new AbortController();
+    for await (const f of fetchRows(rows, deps({ download }), { signal: outer.signal })) {
+      expect(f.row.entry.key).toBe("a.jar");
+      break;
+    }
+    expect(aborted.sort()).toEqual(["b.jar", "c.jar"]);
+    expect(outer.signal.aborted).toBe(false);
   });
 });

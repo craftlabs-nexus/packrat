@@ -32,6 +32,40 @@ export interface BundledVersionRef {
   coversVersions: string[];
 }
 
+/**
+ * A plan's content rule: the status of a scanned local JAR, or undefined
+ * for no opinion. A skip or unresolvable status wins; an import status
+ * (e.g. tags only) replaces the row's import status when no later check
+ * (client-only, optional) applies.
+ */
+export type ContentRule = (scan: LocalJarScan, entry: PackEntry) => ReviewStatus | undefined;
+
+/**
+ * CategoryCraft's rule, the default: a JAR without code is skipped (a
+ * resource or data pack, or a jar-in-jar), a mod with code but neither
+ * item definitions nor item tags is skipped (a library), and one with item
+ * tags but no items of its own is imported "tags only" (e.g. c:chains
+ * listing other mods' chains).
+ */
+export const itemContentRule: ContentRule = (s) => {
+  if (!s.hasClassFiles) {
+    return {
+      kind: "skip",
+      reason: "no-items",
+      detail: "no code (resource/data pack or jar-in-jar)",
+    };
+  }
+  if (s.hasItemDefinitions) return undefined;
+  if (!s.hasItemTags) {
+    return {
+      kind: "skip",
+      reason: "no-items",
+      detail: "no items or item tags (library)",
+    };
+  }
+  return { kind: "import", tagsOnly: true };
+};
+
 export interface BuildPlanContext {
   existingSources: ExistingSource[];
   availableVersions: BundledVersionRef[];
@@ -45,6 +79,14 @@ export interface BuildPlanContext {
   hash?: (buffer: ArrayBuffer) => Promise<string | undefined>;
   /** Progress of the local JAR scan */
   onProgress?: (done: number, total: number) => void;
+  /**
+   * The status of a scanned local JAR, after the already-imported and
+   * duplicate checks and before client-only. Default: {@link itemContentRule};
+   * null for none (every readable JAR is imported).
+   */
+  contentStatus?: ContentRule | null;
+  /** Untick client-only mods (pack side or Modrinth sides). Default true. */
+  skipClientOnly?: boolean;
 }
 
 /** A source's display name, as the Sources modal shows it. */
@@ -130,6 +172,8 @@ export async function buildPlan(
   const scan = ctx.scan ?? scanJar;
   const hash = ctx.hash ?? trySha512Hex;
   const resolve = ctx.resolve ?? resolveModrinth;
+  const contentRule = ctx.contentStatus === undefined ? itemContentRule : ctx.contentStatus;
+  const skipClientOnly = ctx.skipClientOnly ?? true;
   const notes = [...(input.notes ?? [])];
 
   // 1. Local JARs: hash (the actual bytes win over a possibly stale .index
@@ -262,36 +306,24 @@ export async function buildPlan(
       if (modrinth) seenProjects.add(modrinth.projectId);
       if (duplicate) return { kind: "skip", reason: "duplicate-in-pack" };
 
-      if (s && !s.hasClassFiles) {
-        return {
-          kind: "skip",
-          reason: "no-items",
-          detail: "no code (resource/data pack or jar-in-jar)",
-        };
-      }
-      // A mod with code but no items of its own can still add item tags
-      // (e.g. c:chains listing other mods' chains): import those.
-      const tagsOnly = !!s && !s.hasItemDefinitions;
-      if (s && tagsOnly && !s.hasItemTags) {
-        return {
-          kind: "skip",
-          reason: "no-items",
-          detail: "no items or item tags (library)",
-        };
-      }
+      let importStatus: ReviewStatus = { kind: "import" };
+      const content = s && contentRule ? contentRule(s, entry) : undefined;
+      if (content?.kind === "import") importStatus = content;
+      else if (content) return content;
 
       if (
-        entry.side === "client" ||
-        (project &&
-          project.serverSide === "unsupported" &&
-          project.clientSide !== "unsupported")
+        skipClientOnly &&
+        (entry.side === "client" ||
+          (project &&
+            project.serverSide === "unsupported" &&
+            project.clientSide !== "unsupported"))
       ) {
         return { kind: "skip", reason: "client-only" };
       }
 
       if (entry.optional) return { kind: "skip", reason: "optional" };
 
-      return tagsOnly ? { kind: "import", tagsOnly: true } : { kind: "import" };
+      return importStatus;
     })();
 
     const selectable =

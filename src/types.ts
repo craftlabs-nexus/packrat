@@ -65,7 +65,10 @@ export interface PackAnalysis {
   notes?: string[];
 }
 
-/** From the zip central directory (no decompression of content). */
+/**
+ * From the zip central directory (no decompression of content). The item
+ * fields serve the default content rule (`itemContentRule`).
+ */
 export interface LocalJarScan {
   hasClassFiles: boolean;
   /** assets/<ns != minecraft>/items/*.json or models/item/*.json */
@@ -169,7 +172,6 @@ export interface ExistingSource {
 
 /** What the runner tells the consumer's `commit` about a JAR it imported. */
 export interface ImportMetadata {
-  importSource: "pack";
   packName?: string;
   /**
    * Lowercase hex SHA-512 of the JAR bytes: the pack's when verify confirmed
@@ -185,12 +187,3 @@ export interface ImportMetadata {
   displayName?: string;
 }
 
-/**
- * The least the runner needs from the consumer's extraction result: a JAR
- * with no items is skipped unless it has code and item tags (a library
- * tagging other mods' items is imported "tags only").
- */
-export interface ExtractedJar {
-  hasCode: boolean;
-  data: { items: readonly unknown[]; tags: Record<string, unknown> };
-}

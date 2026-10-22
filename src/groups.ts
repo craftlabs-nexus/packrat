@@ -13,8 +13,8 @@ export type RowGroup =
   | "no-items"
   | "unresolvable";
 
-/** Display order and labels of the review groups. */
-export const ROW_GROUPS: { group: RowGroup; label: string }[] = [
+/** Display order and default labels of the review groups (CategoryCraft's wording). */
+export const DEFAULT_ROW_GROUP_LABELS: { group: RowGroup; label: string }[] = [
   { group: "import", label: "Will import" },
   { group: "tags-only", label: "Will import tags only (no items)" },
   { group: "client-only", label: "Client-only" },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ROW_GROUPS, rowGroup } from "./groups";
+import { DEFAULT_ROW_GROUP_LABELS, rowGroup } from "./groups";
 import type { ReviewRow, ReviewStatus } from "./types";
 
 function rowWith(status: ReviewStatus): ReviewRow {
@@ -14,7 +14,7 @@ function rowWith(status: ReviewStatus): ReviewRow {
 
 describe("rowGroup", () => {
   it("maps every status to a listed group", () => {
-    const groups = new Set(ROW_GROUPS.map((g) => g.group));
+    const groups = new Set(DEFAULT_ROW_GROUP_LABELS.map((g) => g.group));
     const statuses: ReviewStatus[] = [
       { kind: "import" },
       { kind: "import", tagsOnly: true },

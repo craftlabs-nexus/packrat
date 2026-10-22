@@ -31,19 +31,31 @@ export { createLimiter, type Limiter } from "./limiter";
 export { resolveModrinth, type ResolveResult } from "./modrinthResolve";
 export {
   buildPlan,
+  itemContentRule,
   proposeVersionAction,
   sourceDisplayName,
   type BuildPlanContext,
   type BundledVersionRef,
+  type ContentRule,
 } from "./plan";
-export { ROW_GROUPS, rowGroup, type RowGroup } from "./groups";
+export { DEFAULT_ROW_GROUP_LABELS, rowGroup, type RowGroup } from "./groups";
 export {
   DEFAULT_DOWNLOAD_CONCURRENCY,
   describeDownloadError,
+  fetchRows,
   runImport,
+  type CommitResult,
+  type FailedRow,
+  type FetchDeps,
+  type FetchedRow,
+  type FetchOptions,
+  type FetchRowsRun,
+  type FetchSummary,
   type ImportSummary,
   type RowProgress,
   type RunnerDeps,
+  type RunOptions,
+  type SkippedRow,
   type SummarySkipReason,
 } from "./runner";
 export {

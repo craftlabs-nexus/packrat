@@ -172,6 +172,59 @@ describe("buildPlan", () => {
     expect(r).toMatchObject({ selectable: true, selected: true });
   });
 
+  it("takes a content rule, or none", async () => {
+    const entries = [local("data.jar"), local("pack.jar"), local("mod.jar")];
+    const scan = async (buffer: ArrayBuffer) => {
+      const name = new TextDecoder().decode(buffer);
+      return { ...CODE_SCAN, hasClassFiles: name === "mod.jar", hasItemDefinitions: false };
+    };
+    const contentStatus = vi.fn((s: LocalJarScan, entry: PackEntry) =>
+      entry.filename === "pack.jar"
+        ? ({ kind: "skip", reason: "no-items", detail: "not a resource pack" } as const)
+        : s.hasClassFiles
+          ? undefined
+          : ({ kind: "import", tagsOnly: true } as const),
+    );
+    const plan = await buildPlan(analysis(entries), ctx({ scan, contentStatus }));
+    expect(contentStatus).toHaveBeenCalledTimes(3);
+    expect(statusOf(plan, "data.jar")).toMatchObject({ kind: "import", tagsOnly: true });
+    expect(statusOf(plan, "pack.jar")).toMatchObject({ kind: "skip", detail: "not a resource pack" });
+    expect(statusOf(plan, "mod.jar")).toMatchObject({ kind: "import" });
+
+    const none = await buildPlan(analysis(entries), ctx({ scan, contentStatus: null }));
+    expect(none.rows.map((r) => r.status)).toEqual([{ kind: "import" }, { kind: "import" }, { kind: "import" }]);
+  });
+
+  it("does not run the content rule on duplicates or already imported JARs", async () => {
+    const contentStatus = vi.fn(() => undefined);
+    await buildPlan(
+      analysis([local("a.jar"), local("a2.jar"), local("old.jar")]),
+      ctx({
+        scan: async (b) => ({ ...CODE_SCAN, modId: new TextDecoder().decode(b) === "old.jar" ? "old" : "a" }),
+        existingSources: [source({ modId: "old" })],
+        contentStatus,
+      }),
+    );
+    expect(contentStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("a content rule's tags-only import still yields to client-only", async () => {
+    const plan = await buildPlan(
+      analysis([{ ...local("c.jar"), side: "client" }]),
+      ctx({ scan: async () => ({ ...CODE_SCAN, hasItemDefinitions: false, hasItemTags: true }) }),
+    );
+    expect(statusOf(plan, "c.jar")).toMatchObject({ kind: "skip", reason: "client-only" });
+  });
+
+  it("keeps client-only mods ticked with skipClientOnly: false", async () => {
+    const plan = await buildPlan(
+      analysis([remote("c.jar", { side: "client" }), remote("o.jar", { side: "client", optional: true })]),
+      ctx({ skipClientOnly: false }),
+    );
+    expect(statusOf(plan, "c.jar")).toMatchObject({ kind: "import", selected: true });
+    expect(statusOf(plan, "o.jar")).toMatchObject({ kind: "skip", reason: "optional" });
+  });
+
   it("does not run the no-items check on remote entries", async () => {
     const plan = await buildPlan(analysis([remote("r.jar")]), ctx());
     expect(statusOf(plan, "r.jar").kind).toBe("import");
