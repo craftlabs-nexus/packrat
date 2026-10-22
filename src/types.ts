@@ -1,0 +1,188 @@
+/**
+ * Types for importing a modpack or mods folder (see ARCHITECTURE.md
+ * "Modpack import"): a source analyzer turns the input into a manifest and
+ * entries, buildPlan() turns those into reviewable rows, runImport() imports
+ * the selected rows.
+ */
+import type { UrlVerdict } from "./downloadUrl";
+
+/** The mod loaders a JAR's metadata can name. */
+export type ModLoader = "fabric" | "quilt" | "forge" | "neoforge";
+
+export type PackKind = "folder" | "mrpack" | "curseforge" | "packwiz";
+export type PackSide = "client" | "server" | "both";
+export type PackLoaderId = "fabric" | "forge" | "neoforge" | "quilt";
+
+export interface PackManifestInfo {
+  kind: PackKind;
+  name?: string;
+  /** Minecraft version the pack targets, e.g. "26.2" */
+  minecraftVersion?: string;
+  loader?: { id: PackLoaderId; version?: string };
+  /** folder kind: the mods folder actually used (relative to the dropped root) */
+  modsFolder?: string;
+  /** folder kind: every mods folder found (the UI offers a choice when > 1) */
+  modsFolderCandidates?: string[];
+  /** packwiz kind: the origin the pack was fetched from (its files are reachable) */
+  packOrigin?: string;
+}
+
+export type PackFileOrigin =
+  | { type: "local"; file: File; relativePath: string }
+  | {
+      type: "remote";
+      url: string;
+      /** Other URLs for the same bytes, tried in order when `url` fails */
+      altUrls?: string[];
+      size?: number;
+    };
+
+export interface PackEntry {
+  /** Unique per plan: relative path or URL */
+  key: string;
+  filename: string;
+  /** undefined when the pack only lists the file (see unresolvable) */
+  origin?: PackFileOrigin;
+  /** From pack metadata */
+  side?: PackSide;
+  /** Lowercase hex, from the manifest or computed */
+  sha512?: string;
+  sha1?: string;
+  modrinth?: { projectId?: string; versionId?: string };
+  curseforge?: { projectId: number; fileId: number };
+  /** packwiz [option] optional = true, default = false */
+  optional?: boolean;
+  /** Why it cannot be fetched in the browser */
+  unresolvable?: string;
+}
+
+/** What a manifest analyzer returns. */
+export interface PackAnalysis {
+  manifest: PackManifestInfo;
+  entries: PackEntry[];
+  notes?: string[];
+}
+
+/** From the zip central directory (no decompression of content). */
+export interface LocalJarScan {
+  hasClassFiles: boolean;
+  /** assets/<ns != minecraft>/items/*.json or models/item/*.json */
+  hasItemDefinitions: boolean;
+  /** data/<ns>/tags/item/**.json: item tags (possibly for other mods' items) */
+  hasItemTags: boolean;
+  modId?: string;
+  displayName?: string;
+  loaders: ModLoader[];
+  size: number;
+}
+
+export type SkipReason =
+  | "client-only"
+  | "no-items"
+  | "already-imported"
+  | "duplicate-in-pack"
+  | "optional";
+
+export type ReviewStatus =
+  /** tagsOnly: a mod with code and item tags but no items of its own */
+  | { kind: "import"; tagsOnly?: boolean }
+  | { kind: "skip"; reason: SkipReason; detail?: string }
+  | { kind: "unresolvable"; reason: string };
+
+/** Modrinth's client_side/server_side (newer API versions also say "unknown") */
+export type ModrinthSide = "required" | "optional" | "unsupported" | "unknown";
+
+export interface ModrinthProjectInfo {
+  id: string;
+  title: string;
+  iconUrl: string | null;
+  clientSide: ModrinthSide;
+  serverSide: ModrinthSide;
+}
+
+export interface ReviewRow {
+  entry: PackEntry;
+  status: ReviewStatus;
+  /** import, client-only and optional rows can be ticked; others cannot */
+  selectable: boolean;
+  /** default: status.kind === "import" */
+  selected: boolean;
+  /** Modrinth project title, else the JAR's mod name, else the filename */
+  title: string;
+  iconUrl?: string;
+  modrinthProject?: ModrinthProjectInfo;
+  modrinthProjectId?: string;
+  modrinthVersionId?: string;
+  scan?: LocalJarScan;
+  /** Remote rows: can the page download it (see downloadUrl.ts) */
+  download?: UrlVerdict;
+}
+
+export type VersionAction =
+  | { kind: "none" }
+  | { kind: "switch"; to: string }
+  | { kind: "note"; text: string };
+
+export interface ImportPlan {
+  manifest: PackManifestInfo;
+  rows: ReviewRow[];
+  /** Proposal for the bundled vanilla version */
+  versionAction: VersionAction;
+  /** Shown above the list (e.g. CurseForge limitation, Modrinth lookup failure) */
+  notes: string[];
+}
+
+export type PackImportErrorCode =
+  | "NO_MODS_FOLDER"
+  | "INVALID_PACK"
+  | "FETCH_FAILED"
+  | "UNSUPPORTED_INPUT";
+
+export class PackImportError extends Error {
+  readonly code: PackImportErrorCode;
+
+  constructor(code: PackImportErrorCode, message: string) {
+    super(message);
+    this.name = "PackImportError";
+    this.code = code;
+  }
+}
+
+/**
+ * What the plan needs to know about a JAR the consumer already holds, to
+ * mark a pack entry "already imported": matched by sha512, then Modrinth
+ * project, then (type "mod") mod id, then (any type but "bundled") filename.
+ */
+export interface ExistingSource {
+  filename: string;
+  /** The consumer's kind of source: "bundled" never matches by filename, "mod" matches by modId */
+  type?: string;
+  modId?: string;
+  sha512?: string;
+  modrinthProjectId?: string;
+  /** Names for the "already imported" detail; the first non-empty wins, else the filename */
+  displayName?: string;
+  modDisplayName?: string;
+}
+
+/** What the runner tells the consumer's `commit` about a JAR it imported. */
+export interface ImportMetadata {
+  importSource: "pack";
+  packName?: string;
+  /** Lowercase hex SHA-512 of the JAR bytes (computed, else the pack's) */
+  sha512?: string;
+  modrinthProjectId?: string;
+  modrinthVersionId?: string;
+  iconUrl?: string;
+  displayName?: string;
+}
+
+/**
+ * The least the runner needs from the consumer's extraction result: a JAR
+ * with no items is skipped unless it has code and item tags (a library
+ * tagging other mods' items is imported "tags only").
+ */
+export interface ExtractedJar {
+  hasCode: boolean;
+  data: { items: readonly unknown[]; tags: Record<string, unknown> };
+}

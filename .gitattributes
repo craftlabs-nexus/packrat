@@ -1,0 +1,26 @@
+# Line endings
+#
+# Git for Windows ships with core.autocrlf=true at the system level, which
+# rewrites checked-out files to CRLF. That fights Prettier/ESLint, makes
+# whole-file diffs out of one-line changes, and differs from what CI (Linux)
+# sees. These rules win over core.autocrlf, so every clone — Windows included —
+# gets LF in the repository AND in the working tree.
+* text=auto eol=lf
+
+# Binary assets: never run line-ending or diff conversion on these.
+# text=auto detects most of them by content, but being explicit means a
+# misdetection can't corrupt a texture.
+*.png   binary
+*.webp  binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.jar   binary
+*.zip   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+*.mp4   binary
+*.webm  binary
