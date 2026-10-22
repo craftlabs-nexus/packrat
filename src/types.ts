@@ -5,6 +5,8 @@
  * the selected rows.
  */
 import type { UrlVerdict } from "./downloadUrl";
+import type { modrinthSideSchema } from "./schemas";
+import type { z } from "zod";
 
 /** The mod loaders a JAR's metadata can name. */
 export type ModLoader = "fabric" | "quilt" | "forge" | "neoforge";
@@ -95,7 +97,7 @@ export type ReviewStatus =
   | { kind: "unresolvable"; reason: string };
 
 /** Modrinth's client_side/server_side (newer API versions also say "unknown") */
-export type ModrinthSide = "required" | "optional" | "unsupported" | "unknown";
+export type ModrinthSide = z.infer<typeof modrinthSideSchema>;
 
 export interface ModrinthProjectInfo {
   id: string;

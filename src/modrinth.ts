@@ -21,46 +21,7 @@ export interface ModrinthClientConfig {
   baseUrl?: string;
 }
 
-export type SideRequirement = "required" | "optional" | "unsupported" | "unknown";
-
-/** A project as GET /projects returns it (the fields the resolver reads, and the rest as Modrinth sends them). */
-export interface ModrinthProjectDetails {
-  id: string;
-  slug: string;
-  title: string;
-  description: string;
-  client_side: SideRequirement;
-  server_side: SideRequirement;
-  project_type: string;
-  icon_url: string | null;
-  downloads: number;
-  versions: string[];
-  license?: { id: string; name: string; url: string | null };
-  [key: string]: unknown;
-}
-
-export interface ModrinthFile {
-  hashes: { sha512: string; sha1: string };
-  url: string;
-  filename: string;
-  primary: boolean;
-  size: number;
-  file_type: string | null;
-}
-
-/** A version as POST /version_files returns it. */
-export interface ModrinthVersion {
-  id: string;
-  project_id: string;
-  name: string;
-  version_number: string;
-  version_type: "release" | "beta" | "alpha";
-  files: ModrinthFile[];
-  game_versions: string[];
-  loaders: string[];
-  date_published: string;
-  [key: string]: unknown;
-}
+export type { ModrinthFile, ModrinthProjectDetails, ModrinthVersion } from "./schemas";
 
 function headers(config?: ModrinthClientConfig): Record<string, string> {
   const h: Record<string, string> = { Accept: "application/json" };
@@ -72,11 +33,15 @@ async function failed(response: Response): Promise<never> {
   throw new Error(`Modrinth API error: ${response.status} ${response.statusText}`);
 }
 
-/** GET /projects?ids=[...]: several projects at once (none for an empty list, without a request). */
+/**
+ * GET /projects?ids=[...]: several projects at once ([] for an empty list,
+ * without a request). The response as Modrinth sent it: the resolver
+ * parses it (`modrinthProjectsResponseSchema`, `modrinthProjectSchema`).
+ */
 export async function getProjects(
   projectIds: string[],
   config?: ModrinthClientConfig,
-): Promise<ModrinthProjectDetails[]> {
+): Promise<unknown> {
   if (projectIds.length === 0) return [];
   const url = new URL(`${config?.baseUrl ?? MODRINTH_API_BASE}/projects`);
   url.searchParams.set("ids", JSON.stringify(projectIds));
@@ -88,13 +53,14 @@ export async function getProjects(
 /**
  * POST /version_files: the version of each known hash, keyed by hash;
  * hashes Modrinth does not know are absent ({} for an empty list, without
- * a request).
+ * a request). The response as Modrinth sent it: the resolver parses it
+ * (`modrinthVersionFilesResponseSchema`, `modrinthVersionSchema`).
  */
 export async function getVersionsFromHashes(
   hashes: string[],
   algorithm: "sha1" | "sha512",
   config?: ModrinthClientConfig,
-): Promise<Record<string, ModrinthVersion>> {
+): Promise<unknown> {
   if (hashes.length === 0) return {};
   const response = await fetch(`${config?.baseUrl ?? MODRINTH_API_BASE}/version_files`, {
     method: "POST",

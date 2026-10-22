@@ -185,34 +185,46 @@ export const modrinthProfileSchema = z.looseObject({
 // Modrinth API responses (only the fields pack import uses)
 // ---------------------------------------------------------------------------
 
-const sideRequirement = z.enum(["required", "optional", "unsupported", "unknown"]);
+/** Modrinth's client_side/server_side (newer API versions also say "unknown"). */
+export const modrinthSideSchema = z.enum(["required", "optional", "unsupported", "unknown"]);
 
-export const modrinthVersionLiteSchema = z.looseObject({
-  id: z.string(),
-  project_id: z.string(),
-  files: z.array(
-    z.looseObject({
-      hashes: z.looseObject({
-        sha1: z.string().optional(),
-        sha512: z.string().optional(),
-      }),
-      url: z.string(),
-      filename: z.string(),
-      primary: z.boolean().optional(),
-    }),
-  ),
+/** A version's file, as POST /version_files returns it (the fields the resolver reads). */
+export const modrinthFileSchema = z.looseObject({
+  hashes: z.looseObject({
+    sha1: z.string().optional(),
+    sha512: z.string().optional(),
+  }),
+  url: z.string(),
+  filename: z.string(),
+  primary: z.boolean().optional(),
 });
 
-export const modrinthProjectLiteSchema = z.looseObject({
+/** A version as POST /version_files returns it (the fields the resolver reads). */
+export const modrinthVersionSchema = z.looseObject({
+  id: z.string(),
+  project_id: z.string(),
+  files: z.array(modrinthFileSchema),
+});
+
+/** A project as GET /projects returns it (the fields the resolver reads). */
+export const modrinthProjectSchema = z.looseObject({
   id: z.string(),
   slug: z.string(),
   title: z.string(),
   icon_url: z.string().nullable().optional(),
-  client_side: sideRequirement,
-  server_side: sideRequirement,
+  client_side: modrinthSideSchema,
+  server_side: modrinthSideSchema,
 });
 
-export type ModrinthProjectLite = z.infer<typeof modrinthProjectLiteSchema>;
+/** POST /version_files: versions keyed by the queried hash (each parsed on its own). */
+export const modrinthVersionFilesResponseSchema = z.record(z.string(), z.unknown());
+
+/** GET /projects: a list of projects (each parsed on its own). */
+export const modrinthProjectsResponseSchema = z.array(z.unknown());
+
+export type ModrinthFile = z.infer<typeof modrinthFileSchema>;
+export type ModrinthVersion = z.infer<typeof modrinthVersionSchema>;
+export type ModrinthProjectDetails = z.infer<typeof modrinthProjectSchema>;
 
 /** Short, readable summary of a zod error for user-facing messages. */
 export function describeZodError(error: z.ZodError): string {

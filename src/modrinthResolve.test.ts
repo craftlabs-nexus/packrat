@@ -147,6 +147,22 @@ describe("resolveModrinth", () => {
     expect(resolved.has("a")).toBe(false);
   });
 
+  it("warns about a response of the wrong shape", async () => {
+    const deps: ResolveDeps = {
+      getVersionsFromHashes: vi.fn(async () => ["not", "a", "record"]),
+      getProjects: vi.fn(async () => ({ not: "a list" })),
+    };
+    const { resolved, warning } = await resolveModrinth(
+      [
+        { key: "a", sha512: "aa" },
+        { key: "b", modrinth: { projectId: "P1" } },
+      ],
+      deps,
+    );
+    expect(warning).toMatch(/unexpected response from Modrinth/);
+    expect(resolved.get("b")).toEqual({ projectId: "P1", versionId: undefined });
+  });
+
   it("drops malformed responses", async () => {
     const deps: ResolveDeps = {
       getVersionsFromHashes: vi.fn(async () => ({ aa: { nope: true } })),

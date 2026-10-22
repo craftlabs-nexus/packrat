@@ -11,11 +11,15 @@ import {
   type ModrinthClientConfig,
 } from "./modrinth";
 import {
-  modrinthProjectLiteSchema,
-  modrinthVersionLiteSchema,
-  type ModrinthProjectLite,
+  modrinthProjectSchema,
+  modrinthProjectsResponseSchema,
+  modrinthVersionFilesResponseSchema,
+  modrinthVersionSchema,
+  type ModrinthProjectDetails,
 } from "./schemas";
 import type { ModrinthProjectInfo } from "./types";
+
+const UNEXPECTED_RESPONSE = "unexpected response from Modrinth";
 
 export const HASH_BATCH_SIZE = 200;
 export const PROJECT_BATCH_SIZE = 100;
@@ -45,12 +49,13 @@ export interface ResolveResult {
   warning?: string;
 }
 
+/** The two Modrinth calls; their responses are parsed here, so they may return anything. */
 export interface ResolveDeps {
   getVersionsFromHashes: (
     hashes: string[],
     algorithm: "sha1" | "sha512",
-  ) => Promise<Record<string, unknown>>;
-  getProjects: (ids: string[]) => Promise<unknown[]>;
+  ) => Promise<unknown>;
+  getProjects: (ids: string[]) => Promise<unknown>;
 }
 
 export interface ResolveOptions {
@@ -74,7 +79,7 @@ function chunks<T>(list: T[], size: number): T[][] {
   return out;
 }
 
-function toProjectInfo(p: ModrinthProjectLite): ModrinthProjectInfo {
+function toProjectInfo(p: ModrinthProjectDetails): ModrinthProjectInfo {
   return {
     id: p.id,
     title: p.title,
@@ -125,9 +130,12 @@ export async function resolveModrinth(
     }
     for (const batch of chunks([...byHash.keys()], HASH_BATCH_SIZE)) {
       try {
-        const versions = await deps.getVersionsFromHashes(batch, algorithm);
-        for (const [hash, raw] of Object.entries(versions ?? {})) {
-          const parsed = modrinthVersionLiteSchema.safeParse(raw);
+        const versions = modrinthVersionFilesResponseSchema.safeParse(
+          (await deps.getVersionsFromHashes(batch, algorithm)) ?? {},
+        );
+        if (!versions.success) throw new Error(UNEXPECTED_RESPONSE);
+        for (const [hash, raw] of Object.entries(versions.data)) {
+          const parsed = modrinthVersionSchema.safeParse(raw);
           if (!parsed.success) continue;
           const queried = hash.toLowerCase();
           const cdnUrl =
@@ -155,8 +163,12 @@ export async function resolveModrinth(
   const projects = new Map<string, ModrinthProjectInfo>();
   for (const batch of chunks(projectIds, PROJECT_BATCH_SIZE)) {
     try {
-      for (const raw of (await deps.getProjects(batch)) ?? []) {
-        const parsed = modrinthProjectLiteSchema.safeParse(raw);
+      const list = modrinthProjectsResponseSchema.safeParse(
+        (await deps.getProjects(batch)) ?? [],
+      );
+      if (!list.success) throw new Error(UNEXPECTED_RESPONSE);
+      for (const raw of list.data) {
+        const parsed = modrinthProjectSchema.safeParse(raw);
         if (!parsed.success) continue;
         const info = toProjectInfo(parsed.data);
         projects.set(parsed.data.id, info);
