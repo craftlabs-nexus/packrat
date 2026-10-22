@@ -14,6 +14,7 @@ import {
   type UrlVerdict,
 } from "./downloadUrl";
 import { scanJar } from "./jarScan";
+import type { ModrinthClientConfig } from "./modrinth";
 import { resolveModrinth, type ResolveResult } from "./modrinthResolve";
 import type {
   ExistingSource,
@@ -84,7 +85,10 @@ export interface BuildPlanContext {
    * Default: {@link currentPageProtocol}.
    */
   pageProtocol?: string;
+  /** Default: {@link resolveModrinth} with `modrinth` */
   resolve?: (entries: PackEntry[]) => Promise<ResolveResult>;
+  /** The default resolve's Modrinth client (User-Agent, API base) */
+  modrinth?: ModrinthClientConfig;
   scan?: (buffer: ArrayBuffer) => Promise<LocalJarScan>;
   hash?: (buffer: ArrayBuffer) => Promise<string | undefined>;
   /** Progress of the local JAR scan */
@@ -186,7 +190,8 @@ export async function buildPlan(
 ): Promise<ImportPlan> {
   const scan = ctx.scan ?? scanJar;
   const hash = ctx.hash ?? trySha512Hex;
-  const resolve = ctx.resolve ?? resolveModrinth;
+  const resolve =
+    ctx.resolve ?? ((e: PackEntry[]) => resolveModrinth(e, { config: ctx.modrinth }));
   const contentRule = ctx.contentStatus === undefined ? itemContentRule : ctx.contentStatus;
   const skipClientOnly = ctx.skipClientOnly ?? true;
   const existingSources = ctx.existingSources ?? [];

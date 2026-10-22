@@ -3,16 +3,19 @@
  * responses it reads (https://docs.modrinth.com/api/). Browser and worker
  * safe: plain fetch, no token (both endpoints are public).
  *
- * Modrinth asks every client for a unique User-Agent; a browser cannot set
- * one (the request's Origin identifies the page instead), a worker or Node
- * caller passes it in `config.userAgent`. The limit is 300 requests per
- * minute per IP; the resolver batches hashes (200) and project ids (100).
+ * Modrinth asks every client for a unique User-Agent: pass it in
+ * `config.userAgent` (resolveModrinth's `config`, BuildPlanContext's
+ * `modrinth`). The Fetch spec no longer forbids the header; Chromium and
+ * Firefox send it, Safari drops it, and in a browser it costs a CORS
+ * preflight (the page's Origin identifies it either way). The limit is 300
+ * requests per minute per IP; the resolver batches hashes (200) and project
+ * ids (100).
  */
 
 export const MODRINTH_API_BASE = "https://api.modrinth.com/v2";
 
 export interface ModrinthClientConfig {
-  /** Sent where the runtime allows it (not in browsers) */
+  /** Sent as User-Agent (dropped by runtimes that refuse it, such as Safari) */
   userAgent?: string;
   /** Another API base (tests, a proxy) */
   baseUrl?: string;

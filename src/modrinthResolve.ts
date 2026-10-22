@@ -5,7 +5,11 @@
  * Failures are not fatal: the plan just lacks Modrinth details.
  */
 import { getErrorMessage } from "./utils";
-import { getProjects, getVersionsFromHashes } from "./modrinth";
+import {
+  getProjects,
+  getVersionsFromHashes,
+  type ModrinthClientConfig,
+} from "./modrinth";
 import {
   modrinthProjectLiteSchema,
   modrinthVersionLiteSchema,
@@ -49,11 +53,20 @@ export interface ResolveDeps {
   getProjects: (ids: string[]) => Promise<unknown[]>;
 }
 
-const defaultDeps: ResolveDeps = {
-  getVersionsFromHashes: (hashes, algorithm) =>
-    getVersionsFromHashes(hashes, algorithm),
-  getProjects: (ids) => getProjects(ids),
-};
+export interface ResolveOptions {
+  /** For the default Modrinth calls: User-Agent, API base */
+  config?: ModrinthClientConfig;
+  /** Other calls in place of Modrinth's (tests, a cache); config is then unused */
+  deps?: ResolveDeps;
+}
+
+function clientDeps(config?: ModrinthClientConfig): ResolveDeps {
+  return {
+    getVersionsFromHashes: (hashes, algorithm) =>
+      getVersionsFromHashes(hashes, algorithm, config),
+    getProjects: (ids) => getProjects(ids, config),
+  };
+}
 
 function chunks<T>(list: T[], size: number): T[][] {
   const out: T[][] = [];
@@ -71,10 +84,19 @@ function toProjectInfo(p: ModrinthProjectLite): ModrinthProjectInfo {
   };
 }
 
+/**
+ * Resolve entries on Modrinth: ceil(n/200) sha512 lookups, then a sha1 pass
+ * for the entries with only a sha1, then ceil(p/100) project lookups.
+ * `options` is `{ config?, deps? }`; a bare ResolveDeps (the 0.1 form) still
+ * works.
+ */
 export async function resolveModrinth(
   entries: ResolveInput[],
-  deps: ResolveDeps = defaultDeps,
+  options: ResolveOptions | ResolveDeps = {},
 ): Promise<ResolveResult> {
+  const opts: ResolveOptions =
+    "getVersionsFromHashes" in options ? { deps: options } : options;
+  const deps = opts.deps ?? clientDeps(opts.config);
   const resolved = new Map<string, ResolvedModrinth>();
   const failures: string[] = [];
 

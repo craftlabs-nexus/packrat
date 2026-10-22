@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { buildPlan } from "./plan";
 import {
   HASH_BATCH_SIZE,
   resolveModrinth,
@@ -153,5 +154,48 @@ describe("resolveModrinth", () => {
     };
     const { resolved } = await resolveModrinth([{ key: "a", sha512: "aa" }], deps);
     expect(resolved.size).toBe(0);
+  });
+
+  it("takes { deps } as well as bare deps", async () => {
+    const deps: ResolveDeps = {
+      getVersionsFromHashes: vi.fn(async () => ({ aa: version("V1", "P1") })),
+      getProjects: vi.fn(async () => []),
+    };
+    const { resolved } = await resolveModrinth([{ key: "a", sha512: "aa" }], { deps });
+    expect(resolved.get("a")?.projectId).toBe("P1");
+  });
+});
+
+describe("Modrinth client config", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  function stubModrinth() {
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) =>
+      Response.json(url.endsWith("/version_files") ? { aa: version("V1", "P1") } : [project("P1")]),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("reaches the Modrinth calls from resolveModrinth and buildPlan", async () => {
+    const config = { userAgent: "craftlabs/blockscope/1.0", baseUrl: "https://api.test/v2" };
+    const fetchMock = stubModrinth();
+    const { resolved } = await resolveModrinth([{ key: "a", sha512: "aa" }], { config });
+    expect(resolved.get("a")?.project?.title).toBe("Title P1");
+    expect(fetchMock.mock.calls.map((c) => [String(c[0]).split("?")[0], (c[1] as RequestInit).headers])).toEqual([
+      ["https://api.test/v2/version_files", expect.objectContaining({ "User-Agent": config.userAgent })],
+      ["https://api.test/v2/projects", expect.objectContaining({ "User-Agent": config.userAgent })],
+    ]);
+
+    fetchMock.mockClear();
+    await buildPlan(
+      {
+        manifest: { kind: "mrpack" },
+        entries: [{ key: "a", filename: "a.jar", sha512: "aa", origin: { type: "remote", url: "https://cdn.modrinth.com/a.jar" } }],
+      },
+      { modrinth: config },
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[0][0])).toBe("https://api.test/v2/version_files");
   });
 });
