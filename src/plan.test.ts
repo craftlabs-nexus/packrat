@@ -324,10 +324,10 @@ describe("buildPlan download URLs", () => {
     const a = plan.rows.find((r) => r.entry.filename === "a.jar")!;
     expect(a.status).toEqual({ kind: "import" });
     expect(a.download).toEqual({ kind: "ok", via: "modrinth-substitute" });
+    // the blocked original is not kept as an alternative
     expect(a.entry.origin).toEqual({
       type: "remote",
       url: "https://cdn.modrinth.com/data/P1/a.jar",
-      altUrls: [`${gh}a.jar`],
     });
     expect(statusOf(plan, "b.jar").kind).toBe("unresolvable");
     expect(plan.notes).toEqual([
@@ -355,9 +355,82 @@ describe("buildPlan download URLs", () => {
     expect(plan.rows[0].entry.origin).toEqual({
       type: "remote",
       url: "https://cdn.modrinth.com/data/x/a.jar",
-      altUrls: ["https://github.com/o/r/releases/download/v1/a.jar"],
       size: 3,
     });
+  });
+
+  it("keeps only the mirrors that are not blocked as alternatives", async () => {
+    const plan = await buildPlan(
+      analysis([
+        {
+          key: "mods/a.jar",
+          filename: "a.jar",
+          origin: {
+            type: "remote",
+            url: "https://files.example/a.jar",
+            altUrls: [
+              "http://pack/a.jar",
+              "https://cdn.modrinth.com/data/x/a.jar",
+              "https://github.com/o/r/releases/download/v1/a.jar",
+              "https://mirror.example/a.jar",
+            ],
+          },
+        },
+      ]),
+      ctx(),
+    );
+    expect(plan.rows[0].download).toEqual({ kind: "ok", via: "known-host" });
+    expect(plan.rows[0].entry.origin).toEqual({
+      type: "remote",
+      url: "https://cdn.modrinth.com/data/x/a.jar",
+      altUrls: ["https://files.example/a.jar", "https://mirror.example/a.jar"],
+    });
+  });
+
+  it("keeps an all-blocked origin as it is (the row is unresolvable)", async () => {
+    const urls = ["http://pack/a.jar", "https://github.com/o/r/releases/download/v1/a.jar"];
+    const plan = await buildPlan(
+      analysis([{ key: "a", filename: "a.jar", origin: { type: "remote", url: urls[0], altUrls: urls.slice(1) } }]),
+      ctx(),
+    );
+    expect(plan.rows[0].status).toEqual({
+      kind: "unresolvable",
+      reason: "internal host pack (not reachable from a web page)",
+    });
+  });
+
+  it("drops the pack's blocked URLs behind a Modrinth substitute", async () => {
+    const gh = "https://github.com/o/r/releases/download/v1/a.jar";
+    const plan = await buildPlan(
+      analysis([
+        {
+          key: "mods/a.jar",
+          filename: "a.jar",
+          sha512: "aa",
+          origin: { type: "remote", url: gh, altUrls: ["http://pack/a.jar"] },
+        },
+      ]),
+      ctx({
+        resolve: async () => ({
+          resolved: new Map([["mods/a.jar", { projectId: "P1", cdnUrl: "https://cdn.modrinth.com/a.jar" }]]),
+        }),
+      }),
+    );
+    expect(plan.rows[0].entry.origin).toEqual({ type: "remote", url: "https://cdn.modrinth.com/a.jar" });
+  });
+
+  it("does not substitute a Modrinth URL that is itself blocked", async () => {
+    const gh = "https://github.com/o/r/releases/download/v1/a.jar";
+    const plan = await buildPlan(
+      analysis([at(gh, { sha512: "aa" })]),
+      ctx({
+        resolve: async () => ({
+          resolved: new Map([[gh, { projectId: "P1", cdnUrl: "http://cdn.internal/a.jar" }]]),
+        }),
+      }),
+    );
+    expect(plan.rows[0].status.kind).toBe("unresolvable");
+    expect(plan.rows[0].entry.origin).toEqual({ type: "remote", url: gh });
   });
 });
 

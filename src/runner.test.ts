@@ -275,6 +275,28 @@ describe("runImport", () => {
     ]);
   });
 
+  it("never fetches a URL that allowUrl refuses", async () => {
+    const download = vi.fn(async (url: string, filename: string) => {
+      if (url.startsWith("https://a.example/")) throw new TypeError("Failed to fetch");
+      return new File([filename], filename);
+    });
+    const allowUrl = (url: string) => !url.startsWith("https://evil.example/");
+    const summary = await runImport(
+      [
+        row("m.jar", { urls: ["https://a.example/m.jar", "https://evil.example/m.jar", "https://b.example/m.jar"] }),
+        row("x.jar", { urls: ["https://evil.example/x.jar"] }),
+      ],
+      deps({ download }),
+      { signal: new AbortController().signal, onRow: () => {}, allowUrl },
+    );
+    expect(download.mock.calls.map((c) => c[0])).toEqual([
+      "https://a.example/m.jar",
+      "https://b.example/m.jar",
+    ]);
+    expect(summary.imported).toBe(1);
+    expect(summary.failed).toEqual([{ key: "x.jar", filename: "x.jar", error: "download URL not allowed" }]);
+  });
+
   it("fails the first row on a host that can't connect and skips the rest on it", async () => {
     const download = vi.fn(async (url: string, filename: string) => {
       if (url.startsWith("https://files.example/")) throw new TypeError("Failed to fetch");

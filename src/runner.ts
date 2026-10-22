@@ -66,6 +66,12 @@ export interface ImportSummary {
 export interface RunOptions {
   signal: AbortSignal;
   downloadConcurrency?: number;
+  /**
+   * Last line of defence: a URL it refuses is never fetched (left out as if
+   * the row did not list it; a row left with none fails). The plan already
+   * drops blocked alternatives.
+   */
+  allowUrl?: (url: string) => boolean;
   packName?: string;
   onRow: (key: string, progress: RowProgress) => void;
 }
@@ -180,7 +186,12 @@ export async function runImport<R extends ExtractedJar>(
         if (origin.type === "local") {
           return { ok: true, buffer: await origin.file.arrayBuffer() };
         }
-        const urls = [origin.url, ...(origin.altUrls ?? [])];
+        const urls = [origin.url, ...(origin.altUrls ?? [])].filter(
+          (u) => opts.allowUrl?.(u) ?? true,
+        );
+        if (urls.length === 0) {
+          return { ok: false, error: new Error("download URL not allowed") };
+        }
         let firstError: unknown;
         let connectFailures = true;
         for (const url of urls) {

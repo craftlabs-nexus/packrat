@@ -94,7 +94,10 @@ const VERDICT_RANK: Record<UrlVerdict["kind"], number> = {
 
 /**
  * Of a remote file's URLs (url + altUrls, e.g. an mrpack's mirrors), make
- * the first one a page can fetch the primary; the rest stay alternatives.
+ * the first one a page can fetch the primary; the other URLs that are not
+ * blocked stay alternatives (a blocked URL is never kept for the runner).
+ * When every URL is blocked the origin is returned as it is, with the first
+ * URL's verdict (the row is then unresolvable and never fetched).
  */
 function chooseDownload(
   origin: RemoteOrigin,
@@ -102,13 +105,22 @@ function chooseDownload(
 ): { origin: RemoteOrigin; verdict: UrlVerdict } {
   const candidates = [origin.url, ...(origin.altUrls ?? [])];
   const verdicts = candidates.map((u) => classifyDownloadUrl(u, urlCtx));
-  let best = 0;
-  verdicts.forEach((v, i) => {
-    if (VERDICT_RANK[v.kind] < VERDICT_RANK[verdicts[best].kind]) best = i;
-  });
-  if (best === 0) return { origin, verdict: verdicts[0] };
-  const altUrls = candidates.filter((_, i) => i !== best);
-  return { origin: { ...origin, url: candidates[best], altUrls }, verdict: verdicts[best] };
+  const usable = candidates
+    .map((_, i) => i)
+    .filter((i) => verdicts[i].kind !== "blocked");
+  if (usable.length === 0) return { origin, verdict: verdicts[0] };
+  let best = usable[0];
+  for (const i of usable) {
+    if (VERDICT_RANK[verdicts[i].kind] < VERDICT_RANK[verdicts[best].kind]) best = i;
+  }
+  const altUrls = usable.filter((i) => i !== best).map((i) => candidates[i]);
+  return { origin: withUrls(origin, candidates[best], altUrls), verdict: verdicts[best] };
+}
+
+/** The origin with a new primary URL and alternatives (no altUrls key when there are none). */
+function withUrls(origin: RemoteOrigin, url: string, altUrls: string[]): RemoteOrigin {
+  const { altUrls: _old, ...rest } = origin;
+  return altUrls.length > 0 ? { ...rest, url, altUrls } : { ...rest, url };
 }
 
 export async function buildPlan(
@@ -183,8 +195,11 @@ export async function buildPlan(
     ) {
       continue;
     }
-    const original = [entry.origin.url, ...(entry.origin.altUrls ?? [])];
-    entry.origin = { ...entry.origin, url: cdnUrl, altUrls: original };
+    // The pack's own URLs stay alternatives only when they are not blocked
+    const original = [entry.origin.url, ...(entry.origin.altUrls ?? [])].filter(
+      (u) => classifyDownloadUrl(u, urlCtx).kind !== "blocked",
+    );
+    entry.origin = withUrls(entry.origin, cdnUrl, original);
     verdicts.set(entry.key, { kind: "ok", via: "modrinth-substitute" });
   }
 
