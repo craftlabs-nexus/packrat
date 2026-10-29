@@ -37,6 +37,7 @@
       "default": "./dist/index.js"
     }
   },
+  "packageManager": "pnpm@12.14.0",
   "engines": {
     "node": ">=20"
   },
@@ -49,8 +50,8 @@
     "lint": "eslint .",
     "test": "vitest",
     "test:run": "vitest run",
-    "check": "npm run typecheck && npm run lint && npm run test:run && npm run build",
-    "prepublishOnly": "npm run check"
+    "check": "pnpm run typecheck && pnpm run lint && pnpm run test:run && pnpm run build",
+    "prepublishOnly": "pnpm run check"
   },
   "dependencies": {
     "jszip": "^3.10.1",

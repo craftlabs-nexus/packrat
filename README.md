@@ -159,9 +159,12 @@ are optional; without `availableVersions`, `versionAction` is `{ kind: "none" }`
 ## Development
 
 ```
-npm install
-npm run check     # typecheck, lint, tests, build
+pnpm install
+pnpm run check    # typecheck, lint, tests, build
 ```
+
+pnpm (the version is in `package.json`'s `packageManager`). `pnpm-workspace.yaml` keeps `node_modules` flat and
+installs the Windows and Linux x64 native binaries both, so a checkout shared by Windows and WSL runs from either.
 
 Tests are vitest in Node (synthetic JARs built in `src/test/jarFixtures.ts`; no real mod JAR is committed).
 
